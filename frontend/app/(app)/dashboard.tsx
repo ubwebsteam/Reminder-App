@@ -1,0 +1,246 @@
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
+  Platform,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { useAuth } from "../../src/auth";
+import { apiFetch } from "../../src/api";
+import { colors, radius, shadow, spacing } from "../../src/theme";
+import { Badge, Card, SectionTitle } from "../../src/ui";
+import { fmtDate, fmtRelative } from "../../src/utils";
+import { registerForPush } from "../../src/push";
+
+type Reminder = {
+  id: string;
+  title: string;
+  message: string;
+  scheduled_at: string;
+  next_fire_at?: string | null;
+  channels: string[];
+  status: string;
+  target: { is_self: boolean; name?: string };
+  repeat_count: number;
+  triggered_count: number;
+};
+
+const CHANNEL_ICON: Record<string, any> = {
+  push: "notifications-outline",
+  whatsapp: "logo-whatsapp",
+  sms: "chatbubble-outline",
+  email: "mail-outline",
+};
+
+export default function Dashboard() {
+  const { user } = useAuth();
+  const router = useRouter();
+  const [items, setItems] = useState<Reminder[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = async () => {
+    try {
+      const data = await apiFetch<Reminder[]>("/reminders");
+      setItems(data);
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [])
+  );
+
+  useEffect(() => {
+    registerForPush();
+  }, []);
+
+  const greeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  };
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.greet}>{greeting()},</Text>
+          <Text style={styles.name}>{user?.full_name?.split(" ")[0] || "there"}</Text>
+        </View>
+        <View style={styles.avatar}>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>
+            {(user?.full_name || "U").slice(0, 1).toUpperCase()}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.summaryCard}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.summaryLabel}>Active reminders</Text>
+          <Text style={styles.summaryValue}>{items.length}</Text>
+          <Text style={styles.summarySub}>
+            {items[0] ? `Next: ${fmtRelative(items[0].next_fire_at || items[0].scheduled_at)}` : "Nothing scheduled"}
+          </Text>
+        </View>
+        <View style={styles.summaryGlyph}>
+          <Ionicons name="sparkles" size={24} color={colors.primary} />
+        </View>
+      </View>
+
+      <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.md }}>
+        <SectionTitle>Upcoming</SectionTitle>
+      </View>
+
+      <FlatList
+        data={items}
+        keyExtractor={(i) => i.id}
+        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: 140 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="checkmark-done-circle" size={42} color={colors.primary} />
+            </View>
+            <Text style={styles.emptyTitle}>A clear mind</Text>
+            <Text style={styles.emptySub}>You have no active reminders. Tap + to create one.</Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <Card
+            testID={`reminder-card-${item.id}`}
+            onPress={() => router.push({ pathname: "/reminder/[id]", params: { id: item.id } })}
+            style={{ marginBottom: 12 }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={styles.cardTitle} numberOfLines={1}>
+                {item.title}
+              </Text>
+              {item.target?.is_self ? null : <Badge label={`For ${item.target?.name || "other"}`} />}
+            </View>
+            {item.message ? <Text style={styles.cardMsg} numberOfLines={2}>{item.message}</Text> : null}
+            <View style={styles.cardMeta}>
+              <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
+              <Text style={styles.metaText}>{fmtDate(item.next_fire_at || item.scheduled_at)}</Text>
+            </View>
+            <View style={{ flexDirection: "row", marginTop: 10, alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row" }}>
+                {item.channels.map((c) => (
+                  <View key={c} style={styles.channelDot}>
+                    <Ionicons name={CHANNEL_ICON[c]} size={13} color={colors.primary} />
+                  </View>
+                ))}
+              </View>
+              {item.repeat_count > 1 ? (
+                <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                  {item.triggered_count}/{item.repeat_count}
+                </Text>
+              ) : null}
+            </View>
+          </Card>
+        )}
+      />
+
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => router.push("/reminder/create")}
+        activeOpacity={0.9}
+        testID="fab-create-reminder"
+      >
+        <Ionicons name="add" size={28} color="#fff" />
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.background },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  greet: { color: colors.textMuted, fontSize: 14 },
+  name: { color: colors.text, fontSize: 26, fontWeight: "800", letterSpacing: -0.5 },
+  avatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  summaryCard: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    padding: spacing.lg,
+    backgroundColor: colors.primaryTint,
+    borderRadius: radius.lg,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  summaryLabel: { color: colors.primary, fontSize: 12, fontWeight: "700", letterSpacing: 1.2, textTransform: "uppercase" },
+  summaryValue: { color: colors.text, fontSize: 40, fontWeight: "800", letterSpacing: -1, marginTop: 4 },
+  summarySub: { color: colors.textMuted, marginTop: 4, fontSize: 13 },
+  summaryGlyph: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardTitle: { fontSize: 17, fontWeight: "700", color: colors.text, flex: 1, marginRight: 8 },
+  cardMsg: { fontSize: 13, color: colors.textMuted, marginTop: 4 },
+  cardMeta: { flexDirection: "row", alignItems: "center", marginTop: 10 },
+  metaText: { color: colors.textMuted, marginLeft: 6, fontSize: 13 },
+  channelDot: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.primaryTint,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 6,
+  },
+  fab: {
+    position: "absolute",
+    bottom: Platform.OS === "ios" ? 100 : 90,
+    right: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.fab,
+  },
+  empty: {
+    alignItems: "center",
+    padding: spacing.xl,
+    marginTop: spacing.lg,
+  },
+  emptyIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.primaryTint,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.md,
+  },
+  emptyTitle: { fontSize: 22, fontWeight: "800", color: colors.text, marginBottom: 6 },
+  emptySub: { color: colors.textMuted, fontSize: 14, textAlign: "center" },
+});

@@ -40,10 +40,9 @@ export default function CreateReminder() {
   const [time, setTime] = useState<Date>(now);
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
-  const [leadUnit, setLeadUnit] = useState<"min" | "hour" | "day">("min");
-  const [leadValue, setLeadValue] = useState("0");
   const [repeatCount, setRepeatCount] = useState("1");
-  const [repeatHours, setRepeatHours] = useState("24");
+  const [repeatUnit, setRepeatUnit] = useState<"min" | "hour" | "day">("hour");
+  const [repeatValue, setRepeatValue] = useState("24");
 
   // Step 3
   const [channels, setChannels] = useState<Channel[]>(["push"]);
@@ -74,11 +73,11 @@ export default function CreateReminder() {
     setChannels((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
   };
 
-  const computeLeadMinutes = () => {
-    const v = parseFloat(leadValue) || 0;
-    if (leadUnit === "min") return v;
-    if (leadUnit === "hour") return v * 60;
-    return v * 60 * 24;
+  const computeRepeatHours = () => {
+    const v = parseFloat(repeatValue) || 0;
+    if (repeatUnit === "min") return v / 60;
+    if (repeatUnit === "hour") return v;
+    return v * 24;
   };
 
   const finalDateTime = combineDateTime(date, time);
@@ -87,11 +86,11 @@ export default function CreateReminder() {
     if (step === 0) {
       if (!title.trim()) return "Please enter a title.";
     } else if (step === 1) {
-      if (finalDateTime.getTime() - computeLeadMinutes() * 60000 < Date.now() - 60000) {
+      if (finalDateTime.getTime() < Date.now() - 60000) {
         return "Scheduled time is in the past.";
       }
       if (!(parseInt(repeatCount) >= 1)) return "Repeat count must be at least 1.";
-      if (!(parseFloat(repeatHours) > 0)) return "Repeat interval must be > 0.";
+      if (!(computeRepeatHours() > 0)) return "Repeat interval must be > 0.";
     } else if (step === 2) {
       if (channels.length === 0) return "Select at least one delivery method.";
     } else if (step === 3) {
@@ -124,8 +123,8 @@ export default function CreateReminder() {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         channels,
         repeat_count: parseInt(repeatCount) || 1,
-        repeat_interval_hours: parseFloat(repeatHours) || 24,
-        lead_minutes: Math.round(computeLeadMinutes()),
+        repeat_interval_hours: computeRepeatHours(),
+        lead_minutes: 0,
         target: {
           is_self: isSelf,
           name: isSelf ? null : targetName.trim() || null,
@@ -212,24 +211,7 @@ export default function CreateReminder() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={[styles.label, { marginTop: spacing.lg }]}>Remind before (lead)</Text>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Input
-                  placeholder="0"
-                  keyboardType="numeric"
-                  value={leadValue}
-                  onChangeText={setLeadValue}
-                  style={{ width: 90, marginRight: 10 }}
-                  testID="wizard-lead-value"
-                />
-                <View style={{ flexDirection: "row" }}>
-                  {(["min", "hour", "day"] as const).map((u) => (
-                    <Chip key={u} label={u} selected={leadUnit === u} onPress={() => setLeadUnit(u)} testID={`lead-${u}`} />
-                  ))}
-                </View>
-              </View>
-
-              <Text style={[styles.label, { marginTop: spacing.md }]}>How often to repeat</Text>
+              <Text style={[styles.label, { marginTop: spacing.lg }]}>Repeat</Text>
               <View style={{ flexDirection: "row" }}>
                 <Input
                   label="Count"
@@ -242,18 +224,36 @@ export default function CreateReminder() {
                 />
                 <View style={{ width: 12 }} />
                 <Input
-                  label="Every (hours)"
+                  label={`Every (${repeatUnit === "min" ? "minutes" : repeatUnit === "hour" ? "hours" : "days"})`}
                   placeholder="24"
                   keyboardType="numeric"
-                  value={repeatHours}
-                  onChangeText={setRepeatHours}
+                  value={repeatValue}
+                  onChangeText={setRepeatValue}
                   style={{ flex: 1 }}
-                  testID="wizard-repeat-hours"
+                  testID="wizard-repeat-value"
                 />
               </View>
-              <Card style={{ flexDirection: "row", alignItems: "center", backgroundColor: colors.primaryTint, borderColor: "transparent", marginTop: 6 }}>
+              <View style={{ flexDirection: "row", marginTop: 4 }}>
+                {(["min", "hour", "day"] as const).map((u) => (
+                  <Chip
+                    key={u}
+                    label={u === "min" ? "Minutes" : u === "hour" ? "Hours" : "Days"}
+                    selected={repeatUnit === u}
+                    onPress={() => {
+                      setRepeatUnit(u);
+                      // sensible defaults when switching unit
+                      if (u === "min" && (parseFloat(repeatValue) || 0) > 60) setRepeatValue("30");
+                      if (u === "hour") setRepeatValue((prev) => (parseFloat(prev) || 0) > 48 ? "24" : prev);
+                    }}
+                    testID={`repeat-unit-${u}`}
+                  />
+                ))}
+              </View>
+              <Card style={{ flexDirection: "row", alignItems: "center", backgroundColor: colors.primaryTint, borderColor: "transparent", marginTop: spacing.md }}>
                 <Ionicons name="flash" size={18} color={colors.primary} />
-                <Text style={{ marginLeft: 8, color: colors.text, flex: 1 }}>First fire at {fmtDate(new Date(finalDateTime.getTime() - computeLeadMinutes() * 60000).toISOString())}</Text>
+                <Text style={{ marginLeft: 8, color: colors.text, flex: 1 }}>
+                  First fire at {fmtDate(finalDateTime.toISOString())}
+                </Text>
               </Card>
             </>
           )}

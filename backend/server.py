@@ -145,6 +145,12 @@ class ReminderOut(BaseModel):
     created_at: str
     next_fire_at: Optional[str] = None
     last_fired_at: Optional[str] = None
+    pending_channels: List[str] = []
+    needs_user_send: bool = False
+
+
+class MarkSentIn(BaseModel):
+    channel: Literal["whatsapp", "email", "sms"]
 
 
 class StatusUpdate(BaseModel):
@@ -359,29 +365,43 @@ async def _fire_reminder(reminder_id: str) -> None:
     title = r["title"]
     msg = r.get("message") or title
     target = r.get("target", {})
+    is_self = target.get("is_self", True)
     channels = r.get("channels", [])
     results = {}
+    pending_for_others = []  # channels awaiting manual user-send
+
+    # push is always auto-delivered (to owner or matched other user)
     if "push" in channels:
-        # push goes to reminder owner (unless target.is_self=False and another user is matched)
         push_token = user.get("expo_push_token")
-        if not target.get("is_self") and target.get("phone"):
-            other = await db.users.find_one({"phone": target["phone"]}, {"_id": 0})
+        if not is_self and target.get("phone"):
+            other = await db.users.find_one({"phone_full": target["phone"]}, {"_id": 0})
             if other and other.get("expo_push_token"):
                 push_token = other["expo_push_token"]
+        # Also notify the reminder owner so they know to open the app
+        if not is_self and user.get("expo_push_token"):
+            await send_expo_push(
+                user["expo_push_token"],
+                f"Time to remind {target.get('name') or 'them'}",
+                f"{title} — tap to open and send.",
+                {"reminder_id": reminder_id},
+            )
         results["push"] = await send_expo_push(push_token or "", title, msg, {"reminder_id": reminder_id})
-    if "whatsapp" in channels:
-        to = target.get("phone") if not target.get("is_self") else user.get("phone_full")
-        if to:
-            results["whatsapp"] = await send_whatsapp(to, f"*{title}*\n{msg}")
-    if "sms" in channels:
-        to = target.get("phone") if not target.get("is_self") else user.get("phone_full")
-        if to:
-            results["sms"] = await send_sms(to, f"{title}: {msg}")
-    if "email" in channels:
-        to = target.get("email") if not target.get("is_self") else user.get("email")
-        if to:
-            html = f"<h2>{title}</h2><p>{msg}</p>"
-            results["email"] = await send_email(to, title, html)
+
+    # whatsapp / sms / email:
+    # - self: auto-send via server
+    # - other: add to pending_channels; user will tap Send inside the reminder
+    for ch in ("whatsapp", "sms", "email"):
+        if ch not in channels:
+            continue
+        if is_self:
+            if ch == "whatsapp" and user.get("phone_full"):
+                results[ch] = await send_whatsapp(user["phone_full"], f"*{title}*\n{msg}")
+            elif ch == "sms" and user.get("phone_full"):
+                results[ch] = await send_sms(user["phone_full"], f"{title}: {msg}")
+            elif ch == "email" and user.get("email"):
+                results[ch] = await send_email(user["email"], title, f"<h2>{title}</h2><p>{msg}</p>")
+        else:
+            pending_for_others.append(ch)
 
     now = datetime.now(timezone.utc).isoformat()
     new_triggered = r.get("triggered_count", 0) + 1
@@ -390,7 +410,11 @@ async def _fire_reminder(reminder_id: str) -> None:
         "last_fired_at": now,
         "last_results": results,
     }
-    # append to history log
+    if pending_for_others:
+        existing = set(r.get("pending_channels", []) or [])
+        existing.update(pending_for_others)
+        update["pending_channels"] = sorted(existing)
+
     log_entry = {
         "id": str(uuid.uuid4()),
         "reminder_id": reminder_id,
@@ -398,13 +422,25 @@ async def _fire_reminder(reminder_id: str) -> None:
         "results": results,
     }
     await db.reminder_logs.insert_one(log_entry)
-    if new_triggered >= r.get("repeat_count", 1):
-        update["status"] = "completed"
-        update["next_fire_at"] = None
+
+    # Completion logic:
+    # - self: complete when triggered_count reaches repeat_count
+    # - other: never auto-complete; user must tap Send for each pending channel
+    if is_self:
+        if new_triggered >= r.get("repeat_count", 1):
+            update["status"] = "completed"
+            update["next_fire_at"] = None
+
     await db.reminders.update_one({"id": reminder_id}, {"$set": update})
-    # reschedule next occurrence
+
+    # Reschedule next occurrence ONLY for self-reminders with remaining repeats
     updated = await db.reminders.find_one({"id": reminder_id}, {"_id": 0})
-    if updated and updated.get("status") in ("pending", "active"):
+    if (
+        updated
+        and updated.get("status") in ("pending", "active")
+        and is_self
+        and new_triggered < r.get("repeat_count", 1)
+    ):
         await _schedule_reminder_job(updated)
 
 
@@ -443,6 +479,7 @@ def _user_to_out(u: dict) -> UserOut:
 
 
 def _reminder_to_out(r: dict) -> ReminderOut:
+    pending = r.get("pending_channels", []) or []
     return ReminderOut(
         id=r["id"],
         user_id=r["user_id"],
@@ -460,6 +497,8 @@ def _reminder_to_out(r: dict) -> ReminderOut:
         created_at=r.get("created_at", ""),
         next_fire_at=r.get("next_fire_at"),
         last_fired_at=r.get("last_fired_at"),
+        pending_channels=pending,
+        needs_user_send=len(pending) > 0,
     )
 
 
@@ -589,6 +628,29 @@ async def get_reminder(rid: str, current=Depends(get_current_user)):
     if not r:
         raise HTTPException(404, "Reminder not found")
     return _reminder_to_out(r)
+
+
+@api.post("/reminders/{rid}/mark-sent", response_model=ReminderOut)
+async def mark_channel_sent(rid: str, body: MarkSentIn, current=Depends(get_current_user)):
+    """User tapped Send for a WhatsApp/SMS/Email channel for a reminder-for-others.
+    Removes the channel from pending_channels. When empty, move reminder to completed."""
+    r = await db.reminders.find_one({"id": rid, "user_id": current["id"]}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Reminder not found")
+    pending = list(r.get("pending_channels", []) or [])
+    if body.channel in pending:
+        pending.remove(body.channel)
+    update: dict = {"pending_channels": pending}
+    if not pending:
+        update["status"] = "completed"
+        update["next_fire_at"] = None
+        try:
+            scheduler.remove_job(_job_id(rid))
+        except Exception:
+            pass
+    await db.reminders.update_one({"id": rid}, {"$set": update})
+    fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
+    return _reminder_to_out(fresh)
 
 
 @api.patch("/reminders/{rid}", response_model=ReminderOut)

@@ -30,6 +30,8 @@ type Reminder = {
   repeat_interval_hours: number;
   lead_minutes: number;
   target: { is_self: boolean; name?: string; phone?: string; email?: string };
+  pending_channels?: string[];
+  needs_user_send?: boolean;
 };
 
 const CHANNEL_META: Record<string, { icon: any; label: string }> = {
@@ -54,7 +56,14 @@ export default function ReminderDetail() {
   };
   useFocusEffect(useCallback(() => { load(); }, [id]));
 
-  const action = async (a: "complete" | "cancel" | "postpone", postpone_minutes = 30) => {
+  const confirm = (title: string, body: string, onOk: () => void, okLabel = "Confirm", destructive = false) => {
+    Alert.alert(title, body, [
+      { text: "Cancel", style: "cancel" },
+      { text: okLabel, style: destructive ? "destructive" : "default", onPress: onOk },
+    ]);
+  };
+
+  const doAction = async (a: "complete" | "cancel" | "postpone", postpone_minutes = 30) => {
     try {
       await apiFetch(`/reminders/${id}/action`, {
         method: "POST",
@@ -70,22 +79,35 @@ export default function ReminderDetail() {
     }
   };
 
-  const delReminder = async () => {
-    Alert.alert("Delete reminder", "Are you sure?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await apiFetch(`/reminders/${id}`, { method: "DELETE" });
-            router.back();
-          } catch (e: any) {
-            Alert.alert("Error", e.message);
-          }
-        },
+  const action = (a: "complete" | "cancel" | "postpone", postpone_minutes = 30) => {
+    if (a === "complete") {
+      confirm("Mark as completed?", "This reminder will move to history.", () => doAction(a));
+    } else if (a === "cancel") {
+      confirm("Cancel this reminder?", "It will stop firing and move to history.", () => doAction(a), "Yes, cancel", true);
+    } else {
+      confirm(
+        "Postpone 30 minutes?",
+        "We'll ring you again after 30 minutes.",
+        () => doAction(a, postpone_minutes)
+      );
+    }
+  };
+
+  const delReminder = () => {
+    confirm(
+      "Delete reminder?",
+      "This permanently removes the reminder.",
+      async () => {
+        try {
+          await apiFetch(`/reminders/${id}`, { method: "DELETE" });
+          router.back();
+        } catch (e: any) {
+          Alert.alert("Error", e.message);
+        }
       },
-    ]);
+      "Delete",
+      true
+    );
   };
 
   const openChannel = async (channel: string) => {
@@ -103,6 +125,16 @@ export default function ReminderDetail() {
     if (!url) return Alert.alert("Unavailable", "Contact info missing for this channel.");
     try {
       await Linking.openURL(url);
+      // If this channel is pending (reminder has fired for other person), mark it sent
+      if (r.pending_channels?.includes(channel)) {
+        try {
+          await apiFetch(`/reminders/${id}/mark-sent`, {
+            method: "POST",
+            body: JSON.stringify({ channel }),
+          });
+          await load();
+        } catch {}
+      }
     } catch {
       Alert.alert("Can't open", "This device cannot open the selected app.");
     }
@@ -167,20 +199,57 @@ export default function ReminderDetail() {
 
         <View style={{ marginTop: spacing.lg }}>
           <SectionTitle>Delivery channels</SectionTitle>
+          {r.pending_channels && r.pending_channels.length > 0 && (
+            <Card
+              style={{
+                backgroundColor: "#FFF4E5",
+                borderColor: colors.warning,
+                flexDirection: "row",
+                alignItems: "center",
+                marginBottom: 10,
+              }}
+              testID="needs-send-banner"
+            >
+              <Ionicons name="alert-circle" size={22} color={colors.warning} style={{ marginRight: 10 }} />
+              <Text style={{ flex: 1, color: colors.text, fontSize: 13 }}>
+                It's time! Tap <Text style={{ fontWeight: "700" }}>Send</Text> on each channel below. Reminder moves to history once all are sent.
+              </Text>
+            </Card>
+          )}
           <View style={{ gap: 10 }}>
-            {r.channels.map((c) => (
-              <View key={c} style={styles.channelRow}>
-                <View style={styles.chIcon}>
-                  <Ionicons name={CHANNEL_META[c]?.icon || "send"} size={18} color={colors.primary} />
+            {r.channels.map((c) => {
+              const isPending = r.pending_channels?.includes(c);
+              return (
+                <View
+                  key={c}
+                  style={[
+                    styles.channelRow,
+                    isPending && { borderColor: colors.warning, backgroundColor: "#FFFBF2" },
+                  ]}
+                >
+                  <View style={styles.chIcon}>
+                    <Ionicons name={CHANNEL_META[c]?.icon || "send"} size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.text, fontWeight: "600" }}>{CHANNEL_META[c]?.label || c}</Text>
+                    {isPending && (
+                      <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "700", marginTop: 2 }}>
+                        TAP SEND TO DELIVER
+                      </Text>
+                    )}
+                  </View>
+                  {!r.target?.is_self && c !== "push" && (
+                    <TouchableOpacity
+                      onPress={() => openChannel(c)}
+                      style={[styles.sendBtn, isPending && { backgroundColor: colors.warning }]}
+                      testID={`send-${c}`}
+                    >
+                      <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>Send</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
-                <Text style={{ flex: 1, color: colors.text, fontWeight: "600" }}>{CHANNEL_META[c]?.label || c}</Text>
-                {!r.target?.is_self && c !== "push" && (
-                  <TouchableOpacity onPress={() => openChannel(c)} style={styles.sendBtn} testID={`send-${c}`}>
-                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>Send</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))}
+              );
+            })}
           </View>
         </View>
 

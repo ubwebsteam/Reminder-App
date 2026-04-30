@@ -29,6 +29,8 @@ type Reminder = {
   target: { is_self: boolean; name?: string };
   repeat_count: number;
   triggered_count: number;
+  pending_channels?: string[];
+  needs_user_send?: boolean;
 };
 
 const CHANNEL_ICON: Record<string, any> = {
@@ -119,13 +121,20 @@ export default function Dashboard() {
           <Card
             testID={`reminder-card-${item.id}`}
             onPress={() => router.push({ pathname: "/reminder/[id]", params: { id: item.id } })}
-            style={{ marginBottom: 12 }}
+            style={[
+              { marginBottom: 12 },
+              item.needs_user_send ? { borderColor: colors.warning, borderWidth: 1.5 } : null,
+            ]}
           >
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Text style={styles.cardTitle} numberOfLines={1}>
                 {item.title}
               </Text>
-              {item.target?.is_self ? null : <Badge label={`For ${item.target?.name || "other"}`} />}
+              {item.needs_user_send ? (
+                <Badge label="NEEDS SEND" color={colors.warning} />
+              ) : item.target?.is_self ? null : (
+                <Badge label={`For ${item.target?.name || "other"}`} />
+              )}
             </View>
             {item.message ? <Text style={styles.cardMsg} numberOfLines={2}>{item.message}</Text> : null}
             <View style={styles.cardMeta}>

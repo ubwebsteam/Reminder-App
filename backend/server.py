@@ -178,6 +178,18 @@ def hash_password(p: str) -> str:
     return bcrypt.hashpw(p.encode(), bcrypt.gensalt(rounds=10)).decode()
 
 
+def _phone_suffix(value: Optional[str]) -> Optional[str]:
+    """Normalize any phone string to last-10-digits for cross-user matching.
+    Strips '+', spaces, dashes, parentheses, country-code prefix if present.
+    Returns None for empty / too-short numbers."""
+    if not value:
+        return None
+    digits = "".join(c for c in str(value) if c.isdigit())
+    if len(digits) < 7:
+        return None
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
 def verify_password(p: str, h: str) -> bool:
     try:
         return bcrypt.checkpw(p.encode(), h.encode())
@@ -370,24 +382,60 @@ async def _fire_reminder(reminder_id: str) -> None:
     results = {}
     pending_for_others = []  # channels awaiting manual user-send
 
-    # push is always auto-delivered (to owner or matched other user)
+    # ---------- Push delivery ----------
     if "push" in channels:
-        push_token = user.get("expo_push_token")
-        if not is_self and target.get("phone"):
-            other = await db.users.find_one({"phone_full": target["phone"]}, {"_id": 0})
-            if other and other.get("expo_push_token"):
-                push_token = other["expo_push_token"]
-        # Also notify the reminder owner so they know to open the app
-        if not is_self and user.get("expo_push_token"):
-            await send_expo_push(
-                user["expo_push_token"],
-                f"Time to remind {target.get('name') or 'them'}",
-                f"{title} — tap to open and send.",
-                {"reminder_id": reminder_id},
-            )
-        results["push"] = await send_expo_push(push_token or "", title, msg, {"reminder_id": reminder_id})
+        if is_self:
+            # Self reminder → notify the owner only
+            if user.get("expo_push_token"):
+                results["push"] = await send_expo_push(
+                    user["expo_push_token"], title, msg, {"reminder_id": reminder_id}
+                )
+        else:
+            # Reminder for another person — try to match them by phone (last 10 digits)
+            target_suffix = _phone_suffix(target.get("phone"))
+            other_user = None
+            other_count = 0
+            if target_suffix:
+                # Use find with a small limit to handle the rare "multiple users with same number" case safely
+                cursor = db.users.find(
+                    {"phone_suffix": target_suffix, "id": {"$ne": user["id"]}},
+                    {"_id": 0},
+                ).limit(5)
+                async for u in cursor:
+                    other_count += 1
+                    if other_user is None:
+                        other_user = u  # use the first match for primary delivery
 
-    # whatsapp / sms / email:
+            if other_user and other_user.get("expo_push_token"):
+                # Match found → deliver the actual reminder to the OTHER user's device
+                results["push_other"] = await send_expo_push(
+                    other_user["expo_push_token"],
+                    title,
+                    msg,
+                    {"reminder_id": reminder_id, "from_user_id": user["id"]},
+                )
+                # Owner gets a complementary "tap to send the rest" notification
+                if user.get("expo_push_token"):
+                    owner_body = (
+                        f"Notification delivered to {target.get('name') or 'them'}. "
+                        f"Tap Send for WhatsApp/SMS/Email if selected."
+                    )
+                    await send_expo_push(
+                        user["expo_push_token"],
+                        f"⏰ {title}",
+                        owner_body,
+                        {"reminder_id": reminder_id},
+                    )
+                results["push_other_match_count"] = other_count
+            else:
+                # No matching user → fall back to delivering to OWNER so they know to open & send
+                if user.get("expo_push_token"):
+                    body = msg if not target.get("name") else f"For {target['name']}: {msg}"
+                    results["push"] = await send_expo_push(
+                        user["expo_push_token"], title, body, {"reminder_id": reminder_id}
+                    )
+
+    # ---------- WhatsApp / SMS / Email ----------
     # - self: auto-send via server
     # - other: add to pending_channels; user will tap Send inside the reminder
     for ch in ("whatsapp", "sms", "email"):
@@ -449,8 +497,14 @@ async def _fire_reminder(reminder_id: str) -> None:
 async def lifespan(app: FastAPI):
     await db.users.create_index("email", unique=True)
     await db.users.create_index("phone_full")
+    await db.users.create_index("phone_suffix")
     await db.reminders.create_index("user_id")
     await db.contacts.create_index("user_id")
+    # Migration: backfill phone_suffix on existing users
+    async for u in db.users.find({"phone_suffix": {"$exists": False}}, {"_id": 0, "id": 1, "phone_full": 1, "phone": 1}):
+        suffix = _phone_suffix(u.get("phone_full") or u.get("phone"))
+        if suffix:
+            await db.users.update_one({"id": u["id"]}, {"$set": {"phone_suffix": suffix}})
     scheduler.start()
     # reschedule all active reminders
     async for r in db.reminders.find({"status": {"$in": ["pending", "active"]}}, {"_id": 0}):
@@ -538,6 +592,7 @@ async def signup(payload: UserSignup):
         "email": email,
         "phone": phone_raw,
         "phone_full": phone_full,
+        "phone_suffix": _phone_suffix(phone_full),
         "country_code": payload.country_code,
         "full_name": payload.full_name.strip(),
         "password_hash": hash_password(payload.password),

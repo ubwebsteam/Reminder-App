@@ -1,9 +1,8 @@
 import React, { useEffect, useRef } from "react";
-import { View, Text, StyleSheet, Animated, Easing, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Animated, Easing, ActivityIndicator, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "../src/auth";
 import { colors, spacing } from "../src/theme";
-import { Ionicons } from "@expo/vector-icons";
 
 export default function Splash() {
   const { user, loading } = useAuth();
@@ -65,18 +64,20 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   logoWrap: {
-    width: 96,
-    height: 96,
+    width: 110,
+    height: 110,
     borderRadius: 28,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: colors.primary,
-    shadowOpacity: 0.45,
+    overflow: "hidden",
+    shadowColor: "#2258E5",
+    shadowOpacity: 0.35,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 16 },
     elevation: 12,
     marginBottom: spacing.lg,
+  },
+  logoImg: {
+    width: "100%",
+    height: "100%",
   },
   brand: { fontSize: 34, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   tag: { color: colors.textMuted, fontSize: 15, marginTop: 6 },
@@ -96,6 +97,11 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     backgroundColor: "#EAE3D6",
+    bottom: 60,
+    right: -60,
+  },
+});
+or: "#EAE3D6",
     bottom: 60,
     right: -60,
   },

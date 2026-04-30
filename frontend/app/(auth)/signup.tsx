@@ -7,10 +7,10 @@ import {
   Platform,
   ScrollView,
   TouchableOpacity,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import { Button, Input } from "../../src/ui";
 import { colors, radius, spacing } from "../../src/theme";
 import { useAuth } from "../../src/auth";
@@ -66,7 +66,7 @@ export default function Signup() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.logoWrap}>
-            <Ionicons name="sparkles" size={24} color="#fff" />
+            <Image source={require("../../assets/images/icon.png")} style={styles.logoImg} resizeMode="cover" />
           </View>
           <Text style={styles.h1}>Create account</Text>
           <Text style={styles.sub}>A calm, trusted system for all your reminders.</Text>
@@ -139,14 +139,13 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingTop: spacing.xl },
   logoWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    overflow: "hidden",
     marginBottom: spacing.lg,
   },
+  logoImg: { width: "100%", height: "100%" },
   h1: { fontSize: 32, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   sub: { color: colors.textMuted, marginTop: 6, fontSize: 15 },
   err: { color: colors.danger, marginBottom: 8, fontSize: 13 },

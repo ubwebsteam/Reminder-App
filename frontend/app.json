@@ -25,7 +25,7 @@
       "package": "com.remindly.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#F8F9F7"
+        "backgroundColor": "#2258E5"
       },
       "edgeToEdgeEnabled": true,
       "googleServicesFile": "./google-services.json",

@@ -44,7 +44,7 @@ export default function Splash() {
 
       <Animated.View style={{ alignItems: "center", opacity, transform: [{ scale }] }}>
         <View style={styles.logoWrap}>
-          <Ionicons name="notifications" size={44} color="#fff" />
+          <Image source={require("../assets/images/icon.png")} style={styles.logoImg} resizeMode="cover" />
         </View>
         <Text style={styles.brand}>Remindly</Text>
         <Text style={styles.tag}>Never miss what matters.</Text>
@@ -97,11 +97,6 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     backgroundColor: "#EAE3D6",
-    bottom: 60,
-    right: -60,
-  },
-});
-or: "#EAE3D6",
     bottom: 60,
     right: -60,
   },

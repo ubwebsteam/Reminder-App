@@ -16,13 +16,13 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.remindly.app",
+      "bundleIdentifier": "com.uditbangra.remindly",
       "infoPlist": {
         "NSUserNotificationsUsageDescription": "Send you timely reminders you set."
       }
     },
     "android": {
-      "package": "com.remindly.app",
+      "package": "com.uditbangra.remindly",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#2258E5"
@@ -68,11 +68,6 @@
     "experiments": {
       "typedRoutes": true
     },
-    "extra": {
-      "eas": {
-        "projectId": "REPLACE_AFTER_EAS_INIT"
-      }
-    },
-    "owner": "REPLACE_WITH_YOUR_EXPO_USERNAME"
+    "owner": "uditbangra"
   }
 }

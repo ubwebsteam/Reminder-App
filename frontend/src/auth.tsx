@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { apiFetch, clearToken, getToken, saveToken } from "./api";
+import { refreshPushTokenAfterAuth } from "./push";
 
 export type User = {
   id: string;
@@ -62,6 +63,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     await saveToken(res.access_token);
     setUser(res.user);
+    // Re-attempt push registration AFTER auth so token is bound to this user.
+    refreshPushTokenAfterAuth().catch(() => {});
   };
 
   const signup = async (d: any) => {
@@ -72,6 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     await saveToken(res.access_token);
     setUser(res.user);
+    refreshPushTokenAfterAuth().catch(() => {});
   };
 
   const logout = async () => {

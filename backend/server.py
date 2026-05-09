@@ -438,16 +438,46 @@ async def _fire_reminder(reminder_id: str) -> None:
     # ---------- WhatsApp / SMS / Email ----------
     # - self: auto-send via server
     # - other: add to pending_channels; user will tap Send inside the reminder
+    tz_name = r.get("timezone") or "UTC"
+    try:
+        local_tz = pytz.timezone(tz_name)
+    except Exception:
+        local_tz = pytz.UTC
+    fired_local = datetime.now(timezone.utc).astimezone(local_tz)
+    when_str = fired_local.strftime("%a, %d %b %Y · %I:%M %p")
+
+    wa_body = f"*⏰ {title}*\n{msg}\n\n_Triggered: {when_str}_"
+    sms_body = f"⏰ {title}: {msg} ({when_str})"
+    email_html = f"""
+    <div style=\"font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;background:#F8F9F7;padding:32px 16px\">
+      <div style=\"background:#fff;border-radius:16px;padding:32px;border:1px solid #E5E7E0\">
+        <div style=\"background:#2A4B41;color:#fff;display:inline-block;padding:6px 12px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:1.2px\">REMINDER</div>
+        <h1 style=\"font-size:24px;color:#1B1F1A;margin:16px 0 8px;letter-spacing:-0.5px\">{title}</h1>
+        <p style=\"color:#4A5147;font-size:15px;line-height:1.55;white-space:pre-wrap;margin:0 0 24px\">{msg}</p>
+        <div style=\"background:#EAF2EE;border-radius:10px;padding:14px 16px;color:#2A4B41;font-size:13px;font-weight:600\">⏰ Triggered: {when_str}</div>
+        <p style=\"color:#94978F;font-size:11px;margin-top:24px;text-align:center\">Sent automatically by Remindly · You created this reminder for yourself.</p>
+      </div>
+    </div>
+    """.strip()
+
     for ch in ("whatsapp", "sms", "email"):
         if ch not in channels:
             continue
         if is_self:
-            if ch == "whatsapp" and user.get("phone_full"):
-                results[ch] = await send_whatsapp(user["phone_full"], f"*{title}*\n{msg}")
-            elif ch == "sms" and user.get("phone_full"):
-                results[ch] = await send_sms(user["phone_full"], f"{title}: {msg}")
-            elif ch == "email" and user.get("email"):
-                results[ch] = await send_email(user["email"], title, f"<h2>{title}</h2><p>{msg}</p>")
+            try:
+                if ch == "whatsapp" and user.get("phone_full"):
+                    results[ch] = await send_whatsapp(user["phone_full"], wa_body)
+                elif ch == "sms" and user.get("phone_full"):
+                    results[ch] = await send_sms(user["phone_full"], sms_body)
+                elif ch == "email" and user.get("email"):
+                    results[ch] = await send_email(user["email"], f"⏰ {title}", email_html)
+                else:
+                    results[ch] = False
+                    logger.warning("[fire] self %s skipped: missing user contact for %s", ch, user.get("id"))
+            except Exception as e:
+                # Never let a 3rd-party failure crash the engine
+                results[ch] = False
+                logger.warning("[fire] self %s exception: %s", ch, e)
         else:
             pending_for_others.append(ch)
 

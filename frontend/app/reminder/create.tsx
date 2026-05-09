@@ -10,7 +10,7 @@ import {
   Alert,
   Modal,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Card, Chip, Input, SectionTitle } from "../../src/ui";
@@ -27,6 +27,7 @@ const STEPS = ["Event", "Timing", "Delivery", "Target"];
 
 export default function CreateReminder() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [step, setStep] = useState(0);
 
@@ -386,7 +387,7 @@ export default function CreateReminder() {
       </KeyboardAvoidingView>
 
       {/* Bottom action */}
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
         {step < 3 ? (
           <Button label="Continue" onPress={next} testID="wizard-next" />
         ) : (
@@ -526,8 +527,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    padding: spacing.lg,
-    paddingBottom: Platform.OS === "ios" ? 34 : spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
     backgroundColor: colors.background,
     borderTopWidth: 1,
     borderTopColor: colors.border,

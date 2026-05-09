@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, RefreshControl } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { View, Text, StyleSheet, FlatList, RefreshControl, Platform } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { apiFetch } from "../../src/api";
@@ -20,6 +20,8 @@ type Reminder = {
 };
 
 export default function History() {
+  const insets = useSafeAreaInsets();
+  const tabBarSpace = 60 + Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 6) + 8;
   const [items, setItems] = useState<Reminder[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -50,7 +52,7 @@ export default function History() {
       <FlatList
         data={items}
         keyExtractor={(i) => i.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
+        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: tabBarSpace + 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
         ListEmptyComponent={
           <View style={styles.empty}>

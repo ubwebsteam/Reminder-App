@@ -9,7 +9,7 @@ import {
   Linking,
   Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Card, SectionTitle, Badge } from "../../src/ui";
@@ -44,6 +44,7 @@ const CHANNEL_META: Record<string, { icon: any; label: string }> = {
 export default function ReminderDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [r, setR] = useState<Reminder | null>(null);
 
   const load = async () => {
@@ -160,7 +161,7 @@ export default function ReminderDetail() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }}>
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 80 + Math.max(insets.bottom, 0) }}>
         <View style={styles.hero}>
           <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
             <Badge

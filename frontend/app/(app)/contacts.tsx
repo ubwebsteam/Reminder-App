@@ -10,7 +10,7 @@ import {
   KeyboardAvoidingView,
   Alert,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { apiFetch } from "../../src/api";
@@ -20,6 +20,8 @@ import { Button, Card, Input } from "../../src/ui";
 type Contact = { id: string; name: string; phone?: string; email?: string };
 
 export default function Contacts() {
+  const insets = useSafeAreaInsets();
+  const tabBarSpace = 60 + Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 6) + 8;
   const [items, setItems] = useState<Contact[]>([]);
   const [modal, setModal] = useState(false);
   const [name, setName] = useState("");
@@ -82,7 +84,7 @@ export default function Contacts() {
       <FlatList
         data={items}
         keyExtractor={(i) => i.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0 }}
+        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: tabBarSpace + 24 }}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="people-outline" size={44} color={colors.textMuted} />
@@ -109,7 +111,7 @@ export default function Contacts() {
       <Modal transparent animationType="slide" visible={modal} onRequestClose={() => setModal(false)}>
         <View style={styles.overlay}>
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-            <View style={styles.sheet}>
+            <View style={[styles.sheet, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
               <View style={styles.handle} />
               <Text style={styles.sheetTitle}>New contact</Text>
               <Input label="Name" placeholder="Jane Doe" value={name} onChangeText={setName} testID="contact-name" />
@@ -152,7 +154,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     padding: spacing.lg,
-    paddingBottom: Platform.OS === "ios" ? 40 : spacing.lg,
   },
   handle: {
     alignSelf: "center", width: 44, height: 5,

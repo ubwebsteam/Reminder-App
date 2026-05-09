@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Modal, View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing } from "./theme";
 import { Button } from "./ui";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,6 +21,7 @@ type Props = {
  */
 export function PickerSheet({ visible, initial, mode, onClose, onConfirm }: Props) {
   const [d, setD] = useState<Date>(initial || new Date());
+  const insets = useSafeAreaInsets();
 
   const days = Array.from({ length: 31 }, (_, i) => i + 1);
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -41,7 +43,7 @@ export function PickerSheet({ visible, initial, mode, onClose, onConfirm }: Prop
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
           <View style={styles.handle} />
           <View style={styles.headerRow}>
             <TouchableOpacity onPress={onClose} testID="picker-cancel">
@@ -137,7 +139,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     padding: spacing.lg,
-    paddingBottom: Platform.OS === "ios" ? 40 : spacing.lg,
   },
   handle: {
     alignSelf: "center",

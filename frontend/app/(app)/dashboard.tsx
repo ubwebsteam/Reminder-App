@@ -8,7 +8,7 @@ import {
   RefreshControl,
   Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
@@ -43,6 +43,10 @@ const CHANNEL_ICON: Record<string, any> = {
 export default function Dashboard() {
   const { user } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // Tab bar height = 60 + bottom inset (matches (app)/_layout.tsx). Add 16 gap above it for the FAB.
+  const tabBarSpace = 60 + Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 6) + 8;
+  const fabBottom = tabBarSpace + 16;
   const [items, setItems] = useState<Reminder[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -106,7 +110,7 @@ export default function Dashboard() {
       <FlatList
         data={items}
         keyExtractor={(i) => i.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: 140 }}
+        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: tabBarSpace + 80 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -160,7 +164,7 @@ export default function Dashboard() {
       />
 
       <TouchableOpacity
-        style={styles.fab}
+        style={[styles.fab, { bottom: fabBottom }]}
         onPress={() => router.push("/reminder/create")}
         activeOpacity={0.9}
         testID="fab-create-reminder"
@@ -226,7 +230,6 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: "absolute",
-    bottom: Platform.OS === "ios" ? 100 : 90,
     right: 24,
     width: 60,
     height: 60,

@@ -108,6 +108,32 @@ user_problem_statement: |
   Real API keys have been provided and added to backend/.env.
 
 backend:
+  - task: "WhatsApp production sender + Content Template integration"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py, /app/backend/.env"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          Switched from Twilio sandbox (whatsapp:+14155238886) to real WhatsApp
+          Business sender (whatsapp:+15558905874 — display name "Rymind", status
+          Online, throughput 80 MPS). Added TWILIO_WA_CONTENT_SID
+          (HX1843cf05b6cb64e19072c561a07d9d86, template "reminder_notification_new",
+          approved by Meta as UTILITY category in English).
+
+          Updated send_whatsapp() to accept template_vars dict and use Twilio
+          Content API when TWILIO_WA_CONTENT_SID is set — required by Meta for
+          proactive sends outside the 24-hour conversation window. Falls back to
+          free-form body if template_vars not provided (preserves OTHER-reminder
+          flow where user manually sends from their device).
+
+          _fire_reminder now passes {"1": title, "2": message, "3": when_str}
+          as template variables for SELF reminders.
+
   - task: "Auto-send for SELF reminders (Twilio WhatsApp + SMS, Resend Email)"
     implemented: true
     working: true

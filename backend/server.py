@@ -49,6 +49,7 @@ TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_PHONE = os.environ.get("TWILIO_PHONE_NUMBER", "")
 TWILIO_WA_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")
+TWILIO_WA_CONTENT_SID = os.environ.get("TWILIO_WA_CONTENT_SID", "")
 RESEND_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 
@@ -250,19 +251,46 @@ def _twilio_ready() -> bool:
     return bool(TWILIO_SID and TWILIO_TOKEN)
 
 
-async def send_whatsapp(to_phone: str, body: str) -> bool:
+async def send_whatsapp(
+    to_phone: str,
+    body: str,
+    template_vars: Optional[dict] = None,
+) -> bool:
+    """Send WhatsApp message via Twilio.
+
+    If TWILIO_WA_CONTENT_SID is configured AND template_vars provided, sends
+    using the approved Content Template (required for proactive sends to users
+    outside the 24-hour conversation window).
+
+    Otherwise falls back to free-form text (works only inside the 24-hr window
+    or for sandbox-joined numbers).
+    """
     if not _twilio_ready() or not TWILIO_WA_FROM:
         logger.info("[whatsapp MOCK] to=%s body=%s", to_phone, body[:80])
         return False
     try:
+        import json as _json
         from twilio.rest import Client  # type: ignore
+
+        use_template = bool(TWILIO_WA_CONTENT_SID and template_vars)
 
         def _send():
             c = Client(TWILIO_SID, TWILIO_TOKEN)
             to = to_phone if to_phone.startswith("whatsapp:") else f"whatsapp:{to_phone}"
-            c.messages.create(from_=TWILIO_WA_FROM, to=to, body=body)
+            if use_template:
+                c.messages.create(
+                    from_=TWILIO_WA_FROM,
+                    to=to,
+                    content_sid=TWILIO_WA_CONTENT_SID,
+                    content_variables=_json.dumps(template_vars),
+                )
+            else:
+                c.messages.create(from_=TWILIO_WA_FROM, to=to, body=body)
 
         await asyncio.to_thread(_send)
+        logger.info(
+            "[whatsapp] sent to=%s via=%s", to_phone, "template" if use_template else "freeform"
+        )
         return True
     except Exception as e:
         logger.warning("[whatsapp] failed: %s", e)
@@ -466,7 +494,12 @@ async def _fire_reminder(reminder_id: str) -> None:
         if is_self:
             try:
                 if ch == "whatsapp" and user.get("phone_full"):
-                    results[ch] = await send_whatsapp(user["phone_full"], wa_body)
+                    # Pass template variables; send_whatsapp will use Content SID if configured
+                    results[ch] = await send_whatsapp(
+                        user["phone_full"],
+                        wa_body,
+                        template_vars={"1": title, "2": msg, "3": when_str},
+                    )
                 elif ch == "sms" and user.get("phone_full"):
                     results[ch] = await send_sms(user["phone_full"], sms_body)
                 elif ch == "email" and user.get("email"):

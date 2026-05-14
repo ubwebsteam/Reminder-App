@@ -1,14 +1,14 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../../src/theme";
+import { getSafeBottom } from "../../src/safeBottom";
 
 export default function AppLayout() {
   const insets = useSafeAreaInsets();
-  // Android gesture nav usually reports a non-zero bottom inset; 3-button nav reports 0.
-  // We always keep an 8px breathing room above whatever the system gives us.
-  const bottomPad = Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 6) + 8;
+  // Robust fallback for Android edge-to-edge where insets.bottom can be 0 on
+  // 3-button nav devices even though the nav bar takes ~48dp.
+  const bottomPad = getSafeBottom(insets.bottom) + 8;
   const tabBarHeight = 60 + bottomPad;
 
   return (

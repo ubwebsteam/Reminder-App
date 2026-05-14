@@ -17,6 +17,7 @@ import { colors, radius, shadow, spacing } from "../../src/theme";
 import { Badge, Card, SectionTitle } from "../../src/ui";
 import { fmtDate, fmtRelative } from "../../src/utils";
 import { registerForPush } from "../../src/push";
+import { getTabBarHeight } from "../../src/safeBottom";
 
 type Reminder = {
   id: string;

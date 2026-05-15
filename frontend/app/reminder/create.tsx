@@ -11,7 +11,7 @@ import {
   Modal,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Card, Chip, Input, SectionTitle } from "../../src/ui";
 import { PickerSheet } from "../../src/PickerSheet";
@@ -28,6 +28,7 @@ const STEPS = ["Event", "Timing", "Delivery", "Target"];
 export default function CreateReminder() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { prefill } = useLocalSearchParams<{ prefill?: string }>();
   const { user } = useAuth();
   const [step, setStep] = useState(0);
 
@@ -59,6 +60,7 @@ export default function CreateReminder() {
 
   const [saving, setSaving] = useState(false);
   const [savedSheet, setSavedSheet] = useState(false);
+  const [isReschedule, setIsReschedule] = useState(false);
 
   const inIndia = (user?.country_code || "+91") === "+91";
 
@@ -69,6 +71,40 @@ export default function CreateReminder() {
       } catch {}
     })();
   }, []);
+
+  // Prefill from an existing reminder (Reschedule flow)
+  useEffect(() => {
+    if (!prefill) return;
+    (async () => {
+      try {
+        const r = await apiFetch<any>(`/reminders/${prefill}`);
+        setIsReschedule(true);
+        setTitle(r.title || "");
+        setMessage(r.message || "");
+        setChannels((r.channels || ["push"]) as Channel[]);
+        setRepeatCount(String(r.repeat_count ?? 1));
+        const hours = r.repeat_interval_hours ?? 24;
+        if (hours < 1) {
+          setRepeatUnit("min");
+          setRepeatValue(String(Math.round(hours * 60)));
+        } else if (hours % 24 === 0 && hours >= 24) {
+          setRepeatUnit("day");
+          setRepeatValue(String(hours / 24));
+        } else {
+          setRepeatUnit("hour");
+          setRepeatValue(String(hours));
+        }
+        const t = r.target || {};
+        setIsSelf(!!t.is_self);
+        setTargetName(t.name || "");
+        setTargetPhone(t.phone || "");
+        setTargetEmail(t.email || "");
+        if (r.contact_id) setContactId(r.contact_id);
+      } catch (e) {
+        // silently ignore — user will fill manually
+      }
+    })();
+  }, [prefill]);
 
   const toggleChannel = (c: Channel) => {
     setChannels((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
@@ -163,7 +199,7 @@ export default function CreateReminder() {
         <TouchableOpacity onPress={() => (step === 0 ? router.back() : back())} testID="wizard-back">
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.topTitle}>New reminder</Text>
+        <Text style={styles.topTitle}>{isReschedule ? "Reschedule reminder" : "New reminder"}</Text>
         <View style={{ width: 26 }} />
       </View>
 

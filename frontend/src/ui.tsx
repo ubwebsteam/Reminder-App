@@ -74,7 +74,19 @@ export function Button({
           {icon ? (
             <Ionicons name={icon} size={18} color={fg} style={{ marginRight: 8 }} />
           ) : null}
-          <Text style={{ color: fg, fontSize: 16, fontWeight: "600" }}>{label}</Text>
+          <Text
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            style={{
+              color: fg,
+              fontSize: 16,
+              fontWeight: "600",
+              paddingHorizontal: 16,
+              flexShrink: 1,
+            }}
+          >
+            {label}
+          </Text>
         </>
       )}
     </TouchableOpacity>
@@ -82,8 +94,8 @@ export function Button({
 }
 
 /* ---------- Input ---------- */
-type InpProps = TextInputProps & { label?: string; error?: string; testID?: string };
-export function Input({ label, error, style, testID, ...rest }: InpProps) {
+type InpProps = TextInputProps & { label?: string; hint?: string; error?: string; testID?: string };
+export function Input({ label, hint, error, style, testID, ...rest }: InpProps) {
   return (
     <View style={{ marginBottom: spacing.md }}>
       {label ? <Text style={inpStyles.label}>{label}</Text> : null}
@@ -93,6 +105,7 @@ export function Input({ label, error, style, testID, ...rest }: InpProps) {
         style={[inpStyles.input, error ? { borderColor: colors.danger } : null, style]}
         {...rest}
       />
+      {hint ? <Text style={inpStyles.hint}>{hint}</Text> : null}
       {error ? <Text style={{ color: colors.danger, marginTop: 6, fontSize: 12 }}>{error}</Text> : null}
     </View>
   );
@@ -104,6 +117,12 @@ const inpStyles = StyleSheet.create({
     color: colors.text,
     marginBottom: 6,
     letterSpacing: 0.2,
+  },
+  hint: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 6,
+    lineHeight: 15,
   },
   input: {
     height: 52,

@@ -115,8 +115,25 @@ export default function Contacts() {
               <View style={styles.handle} />
               <Text style={styles.sheetTitle}>New contact</Text>
               <Input label="Name" placeholder="Jane Doe" value={name} onChangeText={setName} testID="contact-name" />
-              <Input label="Phone (optional)" placeholder="+91 9876543210" keyboardType="phone-pad" value={phone} onChangeText={setPhone} testID="contact-phone" />
-              <Input label="Email (optional)" placeholder="jane@example.com" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} testID="contact-email" />
+              <Input
+                label="Phone"
+                placeholder="+91 9876543210"
+                keyboardType="phone-pad"
+                value={phone}
+                onChangeText={setPhone}
+                hint="Used to send reminders via WhatsApp or SMS."
+                testID="contact-phone"
+              />
+              <Input
+                label="Email"
+                placeholder="jane@example.com"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                value={email}
+                onChangeText={setEmail}
+                hint="Used to send reminders via email."
+                testID="contact-email"
+              />
               <Button label="Save contact" onPress={save} loading={saving} testID="contact-save" />
               <TouchableOpacity onPress={() => setModal(false)} style={{ alignItems: "center", marginTop: 10 }}>
                 <Text style={{ color: colors.textMuted }}>Cancel</Text>

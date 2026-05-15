@@ -104,40 +104,79 @@ export default function Dashboard() {
         </View>
       </View>
 
-      <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.md }}>
-        <SectionTitle>Upcoming</SectionTitle>
-      </View>
-
       <FlatList
-        data={items}
+        data={items.filter((i) => !i.needs_user_send)}
         keyExtractor={(i) => i.id}
         contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: tabBarSpace + 80 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
+        ListHeaderComponent={
+          <>
+            {items.some((i) => i.needs_user_send) && (
+              <View style={{ marginBottom: spacing.md }}>
+                <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+                  <Ionicons name="paper-plane" size={16} color={colors.warning} />
+                  <Text style={[styles.sectionLabel, { color: colors.warning, marginLeft: 6 }]}>
+                    READY TO SEND
+                  </Text>
+                </View>
+                {items
+                  .filter((i) => i.needs_user_send)
+                  .map((item) => (
+                    <Card
+                      key={item.id}
+                      testID={`reminder-card-${item.id}`}
+                      onPress={() => router.push({ pathname: "/reminder/[id]", params: { id: item.id } })}
+                      style={[
+                        { marginBottom: 12, borderColor: colors.warning, borderWidth: 1.5, backgroundColor: "#FFFBF2" },
+                      ]}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <Text style={styles.cardTitle} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <Badge label="NEEDS SEND" color={colors.warning} />
+                      </View>
+                      {item.message ? <Text style={styles.cardMsg} numberOfLines={2}>{item.message}</Text> : null}
+                      <View style={styles.cardMeta}>
+                        <Ionicons name="person-outline" size={14} color={colors.textMuted} />
+                        <Text style={styles.metaText}>For {item.target?.name || "contact"}</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", marginTop: 10 }}>
+                        {item.channels.map((c) => (
+                          <View key={c} style={styles.channelDot}>
+                            <Ionicons name={CHANNEL_ICON[c]} size={13} color={colors.primary} />
+                          </View>
+                        ))}
+                      </View>
+                    </Card>
+                  ))}
+              </View>
+            )}
+            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>UPCOMING</Text>
+          </>
+        }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="checkmark-done-circle" size={42} color={colors.primary} />
+          items.some((i) => i.needs_user_send) ? null : (
+            <View style={styles.empty}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="checkmark-done-circle" size={42} color={colors.primary} />
+              </View>
+              <Text style={styles.emptyTitle}>A clear mind</Text>
+              <Text style={styles.emptySub}>You have no active reminders. Tap + to create one.</Text>
             </View>
-            <Text style={styles.emptyTitle}>A clear mind</Text>
-            <Text style={styles.emptySub}>You have no active reminders. Tap + to create one.</Text>
-          </View>
+          )
         }
         renderItem={({ item }) => (
           <Card
             testID={`reminder-card-${item.id}`}
             onPress={() => router.push({ pathname: "/reminder/[id]", params: { id: item.id } })}
-            style={[
-              { marginBottom: 12 },
-              item.needs_user_send ? { borderColor: colors.warning, borderWidth: 1.5 } : null,
-            ]}
+            style={{ marginBottom: 12 }}
           >
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Text style={styles.cardTitle} numberOfLines={1}>
                 {item.title}
               </Text>
-              {item.needs_user_send ? (
-                <Badge label="NEEDS SEND" color={colors.warning} />
-              ) : item.target?.is_self ? null : (
+              {item.target?.is_self ? null : (
                 <Badge label={`For ${item.target?.name || "other"}`} />
               )}
             </View>
@@ -217,6 +256,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   cardTitle: { fontSize: 17, fontWeight: "700", color: colors.text, flex: 1, marginRight: 8 },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.5,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
   cardMsg: { fontSize: 13, color: colors.textMuted, marginTop: 4 },
   cardMeta: { flexDirection: "row", alignItems: "center", marginTop: 10 },
   metaText: { color: colors.textMuted, marginLeft: 6, fontSize: 13 },

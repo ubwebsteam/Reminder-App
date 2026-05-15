@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, RefreshControl, Platform } from "react-native";
+import { View, Text, StyleSheet, FlatList, RefreshControl, Platform, TouchableOpacity } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { apiFetch } from "../../src/api";
 import { colors, radius, spacing } from "../../src/theme";
@@ -17,10 +17,12 @@ type Reminder = {
   triggered_count: number;
   repeat_count: number;
   channels: string[];
+  target?: { is_self: boolean; name?: string };
 };
 
 export default function History() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const tabBarSpace = 60 + Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 6) + 8;
   const [items, setItems] = useState<Reminder[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -43,6 +45,16 @@ export default function History() {
     s === "completed" ? colors.success : s === "cancelled" ? colors.danger : colors.warning;
   const statusLabel = (s: string) => (s === "completed" ? "Completed" : s === "cancelled" ? "Cancelled" : "Due");
 
+  const reschedule = (id: string) => {
+    router.push({ pathname: "/reminder/create", params: { prefill: id } });
+  };
+
+  const resend = (id: string) => {
+    // Open the existing detail screen — already shows per-channel Send buttons
+    // for non-self reminders, which is exactly the "resend" experience.
+    router.push({ pathname: "/reminder/[id]", params: { id } });
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <View style={styles.header}>
@@ -60,27 +72,55 @@ export default function History() {
             <Text style={{ color: colors.textMuted, marginTop: 8 }}>Nothing here yet</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <Card style={{ marginBottom: 12 }} testID={`history-${item.id}`}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={styles.cardTitle} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <Badge label={statusLabel(item.status)} color={statusColor(item.status)} />
-            </View>
-            {item.message ? <Text style={styles.msg} numberOfLines={2}>{item.message}</Text> : null}
-            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 8 }}>
-              <Ionicons name="calendar-outline" size={13} color={colors.textMuted} />
-              <Text style={styles.meta}>{fmtDate(item.scheduled_at)}</Text>
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
-              <Ionicons name="send-outline" size={13} color={colors.textMuted} />
-              <Text style={styles.meta}>
-                Triggered {item.triggered_count}/{item.repeat_count} time{item.repeat_count === 1 ? "" : "s"}
-              </Text>
-            </View>
-          </Card>
-        )}
+        renderItem={({ item }) => {
+          const forOther = item.target && !item.target.is_self;
+          return (
+            <Card style={{ marginBottom: 12 }} testID={`history-${item.id}`}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={styles.cardTitle} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Badge label={statusLabel(item.status)} color={statusColor(item.status)} />
+              </View>
+              {item.message ? <Text style={styles.msg} numberOfLines={2}>{item.message}</Text> : null}
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 8 }}>
+                <Ionicons name="calendar-outline" size={13} color={colors.textMuted} />
+                <Text style={styles.meta}>{fmtDate(item.scheduled_at)}</Text>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6 }}>
+                <Ionicons name="send-outline" size={13} color={colors.textMuted} />
+                <Text style={styles.meta}>
+                  Triggered {item.triggered_count}/{item.repeat_count} time{item.repeat_count === 1 ? "" : "s"}
+                  {forOther ? ` · For ${item.target?.name || "contact"}` : ""}
+                </Text>
+              </View>
+
+              {/* Action row */}
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.actionPrimary]}
+                  onPress={() => reschedule(item.id)}
+                  activeOpacity={0.85}
+                  testID={`reschedule-${item.id}`}
+                >
+                  <Ionicons name="refresh" size={15} color="#fff" />
+                  <Text style={styles.actionPrimaryText}>Reschedule</Text>
+                </TouchableOpacity>
+                {forOther && (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.actionSecondary]}
+                    onPress={() => resend(item.id)}
+                    activeOpacity={0.85}
+                    testID={`resend-${item.id}`}
+                  >
+                    <Ionicons name="paper-plane" size={15} color={colors.primary} />
+                    <Text style={styles.actionSecondaryText}>Resend</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </Card>
+          );
+        }}
       />
     </SafeAreaView>
   );
@@ -94,4 +134,36 @@ const styles = StyleSheet.create({
   msg: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
   meta: { color: colors.textMuted, fontSize: 12, marginLeft: 6 },
   empty: { alignItems: "center", paddingVertical: 60 },
+  actionRow: {
+    flexDirection: "row",
+    marginTop: spacing.md,
+    gap: 8,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+    gap: 6,
+  },
+  actionPrimary: {
+    backgroundColor: colors.primary,
+  },
+  actionPrimaryText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  actionSecondary: {
+    backgroundColor: colors.primaryTint,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  actionSecondaryText: {
+    color: colors.primary,
+    fontWeight: "700",
+    fontSize: 13,
+  },
 });

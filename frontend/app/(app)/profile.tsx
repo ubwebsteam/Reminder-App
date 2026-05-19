@@ -38,6 +38,24 @@ export default function Profile() {
           </Card>
         </View>
 
+        <View style={{ marginTop: spacing.lg }}>
+          <SectionTitle>Rymind Web</SectionTitle>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push("/linked-devices")}
+            testID="open-linked-devices"
+          >
+            <Card>
+              <Row
+                icon="qr-code-outline"
+                label="Linked devices"
+                value="Scan to sign in"
+                chevron
+              />
+            </Card>
+          </TouchableOpacity>
+        </View>
+
         <View style={{ marginTop: spacing.xl }}>
           <Button
             label="Sign out"
@@ -57,14 +75,15 @@ export default function Profile() {
   );
 }
 
-function Row({ icon, label, value }: { icon: any; label: string; value?: string }) {
+function Row({ icon, label, value, chevron }: { icon: any; label: string; value?: string; chevron?: boolean }) {
   return (
     <View style={rowStyles.row}>
       <View style={rowStyles.iconWrap}>
         <Ionicons name={icon} size={18} color={colors.primary} />
       </View>
       <Text style={{ flex: 1, fontSize: 15, color: colors.text, fontWeight: "600" }}>{label}</Text>
-      {value ? <Text style={{ color: colors.textMuted, fontSize: 13 }}>{value}</Text> : null}
+      {value ? <Text style={{ color: colors.textMuted, fontSize: 13, marginRight: chevron ? 6 : 0 }}>{value}</Text> : null}
+      {chevron ? <Ionicons name="chevron-forward" size={18} color={colors.textMuted} /> : null}
     </View>
   );
 }

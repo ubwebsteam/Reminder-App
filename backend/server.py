@@ -24,7 +24,7 @@ import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
@@ -858,6 +858,198 @@ async def delete_contact(cid: str, current=Depends(get_current_user)):
     if res.deleted_count == 0:
         raise HTTPException(404, "Contact not found")
     return {"ok": True}
+
+
+# =====================================================================
+# Web QR-Login (companion web app pairing) endpoints + WebSocket
+# =====================================================================
+import asyncio as _asyncio_qr
+
+WEB_SESSION_TTL_MIN = 5          # QR validity until scanned
+WEB_TOKEN_EXP_DAYS = 30           # JWT lifetime after approval
+
+# In-memory map: session_id -> set of WebSocket connections waiting for approval
+_qr_listeners: dict[str, set[WebSocket]] = {}
+
+
+def _make_web_jwt(user_id: str, session_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "web_session": session_id,
+        "exp": datetime.now(timezone.utc) + timedelta(days=WEB_TOKEN_EXP_DAYS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+async def _broadcast_qr(session_id: str, payload: dict) -> None:
+    listeners = list(_qr_listeners.get(session_id, set()))
+    for ws in listeners:
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            pass
+
+
+class WebSessionCreate(BaseModel):
+    user_agent: Optional[str] = None
+    ip: Optional[str] = None
+
+
+class WebSessionApprove(BaseModel):
+    device_label: Optional[str] = None
+
+
+@api.post("/web-sessions")
+async def create_web_session(body: WebSessionCreate):
+    sid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    doc = {
+        "session_id": sid,
+        "status": "pending",
+        "user_id": None,
+        "jwt_token": None,
+        "device_info": {
+            "ua": (body.user_agent or "")[:300],
+            "ip": (body.ip or "")[:64],
+            "label": None,
+        },
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=WEB_SESSION_TTL_MIN)).isoformat(),
+        "approved_at": None,
+        "last_seen_at": now.isoformat(),
+    }
+    await db.web_sessions.insert_one(doc)
+    return {"session_id": sid, "expires_at": doc["expires_at"]}
+
+
+@api.get("/web-sessions/{session_id}")
+async def get_web_session(session_id: str):
+    """Public status poll (fallback if WebSocket fails). Token is only returned once,
+    within 60 seconds of approval, and then nulled."""
+    sess = await db.web_sessions.find_one({"session_id": session_id}, {"_id": 0})
+    if not sess:
+        raise HTTPException(404, "Session not found")
+    # auto-expire if too old
+    if sess["status"] == "pending" and datetime.fromisoformat(sess["expires_at"]) < datetime.now(timezone.utc):
+        await db.web_sessions.update_one({"session_id": session_id}, {"$set": {"status": "expired"}})
+        sess["status"] = "expired"
+    if sess["status"] != "approved":
+        return {"status": sess["status"]}
+    # one-shot token delivery
+    token = sess.get("jwt_token")
+    user = None
+    if token:
+        u = await db.users.find_one({"id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
+        if u:
+            user = u
+        await db.web_sessions.update_one(
+            {"session_id": session_id},
+            {"$set": {"jwt_token": None}},  # consume the token
+        )
+    return {"status": "approved", "token": token, "user": user}
+
+
+@api.post("/web-sessions/{session_id}/approve")
+async def approve_web_session(
+    session_id: str,
+    body: WebSessionApprove,
+    current=Depends(get_current_user),
+):
+    sess = await db.web_sessions.find_one({"session_id": session_id})
+    if not sess:
+        raise HTTPException(404, "Session not found")
+    if sess["status"] != "pending":
+        raise HTTPException(409, f"Session is {sess['status']}")
+    if datetime.fromisoformat(sess["expires_at"]) < datetime.now(timezone.utc):
+        await db.web_sessions.update_one({"session_id": session_id}, {"$set": {"status": "expired"}})
+        raise HTTPException(410, "Session expired")
+    token = _make_web_jwt(current["id"], session_id)
+    now = datetime.now(timezone.utc)
+    await db.web_sessions.update_one(
+        {"session_id": session_id},
+        {
+            "$set": {
+                "status": "approved",
+                "user_id": current["id"],
+                "jwt_token": token,
+                "approved_at": now.isoformat(),
+                "expires_at": (now + timedelta(days=WEB_TOKEN_EXP_DAYS)).isoformat(),
+                "last_seen_at": now.isoformat(),
+                "device_info.label": body.device_label or sess["device_info"].get("label"),
+            }
+        },
+    )
+    user = await db.users.find_one({"id": current["id"]}, {"_id": 0, "password_hash": 0})
+    # Push to any web client waiting on the websocket
+    await _broadcast_qr(session_id, {"type": "approved", "token": token, "user": user})
+    return {"ok": True}
+
+
+@api.get("/web-sessions")
+async def list_web_sessions(current=Depends(get_current_user)):
+    cursor = db.web_sessions.find(
+        {"user_id": current["id"], "status": "approved"},
+        {"_id": 0, "jwt_token": 0},
+    ).sort("approved_at", -1)
+    items = await cursor.to_list(50)
+    return items
+
+
+@api.delete("/web-sessions/{session_id}")
+async def revoke_web_session(session_id: str, current=Depends(get_current_user)):
+    sess = await db.web_sessions.find_one({"session_id": session_id})
+    if not sess:
+        raise HTTPException(404, "Session not found")
+    if sess.get("user_id") and sess["user_id"] != current["id"]:
+        raise HTTPException(403, "Not your session")
+    await db.web_sessions.update_one(
+        {"session_id": session_id},
+        {"$set": {"status": "revoked", "jwt_token": None}},
+    )
+    await _broadcast_qr(session_id, {"type": "revoked"})
+    return {"ok": True}
+
+
+@app.websocket("/api/ws/web-session/{session_id}")
+async def ws_web_session(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    sess = await db.web_sessions.find_one({"session_id": session_id})
+    if not sess:
+        await websocket.send_json({"type": "error", "code": "not_found"})
+        await websocket.close()
+        return
+    # If already approved before connect, deliver instantly and close.
+    if sess["status"] == "approved":
+        user = await db.users.find_one({"id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
+        await websocket.send_json({"type": "approved", "token": sess.get("jwt_token"), "user": user})
+        await websocket.close()
+        return
+    if sess["status"] != "pending":
+        await websocket.send_json({"type": sess["status"]})
+        await websocket.close()
+        return
+    _qr_listeners.setdefault(session_id, set()).add(websocket)
+    try:
+        # Keep connection open until approved/expired/disconnected
+        while True:
+            try:
+                # short-circuit on TTL
+                expires_at = datetime.fromisoformat(sess["expires_at"])
+                if datetime.now(timezone.utc) > expires_at:
+                    await websocket.send_json({"type": "expired"})
+                    break
+                await _asyncio_qr.sleep(2)
+            except Exception:
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _qr_listeners.get(session_id, set()).discard(websocket)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 app.include_router(api)

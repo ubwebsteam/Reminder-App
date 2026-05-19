@@ -24,6 +24,7 @@
     "date-fns": "^4.1.0",
     "expo": "~54.0.34",
     "expo-blur": "~15.0.8",
+    "expo-camera": "^55.0.18",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.21",
     "expo-device": "~8.0.10",

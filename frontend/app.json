@@ -18,7 +18,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.uditbangra.remindly",
       "infoPlist": {
-        "NSUserNotificationsUsageDescription": "Send you timely reminders you set."
+        "NSUserNotificationsUsageDescription": "Send you timely reminders you set.",
+        "NSCameraUsageDescription": "Scan QR codes to sign in on Rymind Web."
       }
     },
     "android": {
@@ -33,7 +34,8 @@
         "NOTIFICATIONS",
         "SCHEDULE_EXACT_ALARM",
         "VIBRATE",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "CAMERA"
       ]
     },
     "web": {
@@ -58,6 +60,12 @@
           "icon": "./assets/images/adaptive-icon.png",
           "color": "#2A4B41",
           "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan QR codes to sign in on Rymind Web."
         }
       ],
       "expo-dev-client",

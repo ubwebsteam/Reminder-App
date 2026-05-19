@@ -76,6 +76,12 @@
     "experiments": {
       "typedRoutes": true
     },
-    "owner": "uditbangra"
+    "owner": "uditbangra",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6aba62fd-c601-4bf3-bfa1-4b2ad23ec6fe"
+      }
+    }
   }
 }

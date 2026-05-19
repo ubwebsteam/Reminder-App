@@ -1193,7 +1193,10 @@ async def ws_user(websocket: WebSocket):
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    # Use regex (echoes the request's Origin) instead of "*", because the
+    # CORS spec forbids wildcard origin together with credentials=True.
+    # This safely allows the Emergent preview URLs, localhost, and the web app.
+    allow_origin_regex=r".*",
     allow_methods=["*"],
     allow_headers=["*"],
 )

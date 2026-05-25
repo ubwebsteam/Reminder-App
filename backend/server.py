@@ -61,6 +61,29 @@ db = client[DB_NAME]
 scheduler = AsyncIOScheduler(timezone=pytz.UTC)
 
 
+# ---------------- Real-time user WebSocket registry ----------------
+# Maps user_id -> set of active WebSocket connections (for live sync across
+# all signed-in clients — mobile app + web companion).
+_user_sockets: dict[str, set[WebSocket]] = {}
+
+
+async def broadcast_to_user(user_id: str, payload: dict) -> None:
+    """Send a JSON payload to every active socket belonging to the given user.
+    Failures are swallowed so a dead websocket never breaks an API response."""
+    if not user_id:
+        return
+    sockets = list(_user_sockets.get(user_id, set()))
+    for ws in sockets:
+        try:
+            await ws.send_json(payload)
+        except Exception as e:
+            logger.debug("[ws/user] send failed for %s: %s", user_id, e)
+            try:
+                _user_sockets.get(user_id, set()).discard(ws)
+            except Exception:
+                pass
+
+
 # ---------------- Models ----------------
 class UserSignup(BaseModel):
     email: EmailStr
@@ -554,6 +577,16 @@ async def _fire_reminder(reminder_id: str) -> None:
     ):
         await _schedule_reminder_job(updated)
 
+    # Broadcast fired event to all signed-in clients for this user
+    try:
+        if updated:
+            await broadcast_to_user(
+                r["user_id"],
+                {"type": "reminder.fired", "data": _reminder_to_out(updated).model_dump()},
+            )
+    except Exception as e:
+        logger.debug("[ws] broadcast reminder.fired failed: %s", e)
+
 
 # ---------------- Lifespan ----------------
 @asynccontextmanager
@@ -719,7 +752,12 @@ async def create_reminder(payload: ReminderCreate, current=Depends(get_current_u
     await db.reminders.insert_one(doc)
     await _schedule_reminder_job(doc)
     doc_fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
-    return _reminder_to_out(doc_fresh)
+    out = _reminder_to_out(doc_fresh)
+    try:
+        await broadcast_to_user(current["id"], {"type": "reminder.created", "data": out.model_dump()})
+    except Exception as e:
+        logger.debug("[ws] broadcast reminder.created failed: %s", e)
+    return out
 
 
 @api.get("/reminders", response_model=List[ReminderOut])
@@ -768,7 +806,12 @@ async def mark_channel_sent(rid: str, body: MarkSentIn, current=Depends(get_curr
             pass
     await db.reminders.update_one({"id": rid}, {"$set": update})
     fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
-    return _reminder_to_out(fresh)
+    out = _reminder_to_out(fresh)
+    try:
+        await broadcast_to_user(current["id"], {"type": "reminder.updated", "data": out.model_dump()})
+    except Exception as e:
+        logger.debug("[ws] broadcast reminder.updated failed: %s", e)
+    return out
 
 
 @api.patch("/reminders/{rid}", response_model=ReminderOut)
@@ -784,7 +827,12 @@ async def update_reminder(rid: str, body: ReminderUpdate, current=Depends(get_cu
     fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
     if fresh.get("status") in ("pending", "active"):
         await _schedule_reminder_job(fresh)
-    return _reminder_to_out(fresh)
+    out = _reminder_to_out(fresh)
+    try:
+        await broadcast_to_user(current["id"], {"type": "reminder.updated", "data": out.model_dump()})
+    except Exception as e:
+        logger.debug("[ws] broadcast reminder.updated failed: %s", e)
+    return out
 
 
 @api.post("/reminders/{rid}/action", response_model=ReminderOut)
@@ -814,7 +862,12 @@ async def reminder_action(rid: str, body: StatusUpdate, current=Depends(get_curr
         fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
         await _schedule_reminder_job(fresh)
     fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
-    return _reminder_to_out(fresh)
+    out = _reminder_to_out(fresh)
+    try:
+        await broadcast_to_user(current["id"], {"type": "reminder.updated", "data": out.model_dump()})
+    except Exception as e:
+        logger.debug("[ws] broadcast reminder.updated failed: %s", e)
+    return out
 
 
 @api.delete("/reminders/{rid}")
@@ -826,6 +879,10 @@ async def delete_reminder(rid: str, current=Depends(get_current_user)):
         scheduler.remove_job(_job_id(rid))
     except Exception:
         pass
+    try:
+        await broadcast_to_user(current["id"], {"type": "reminder.deleted", "data": {"id": rid}})
+    except Exception as e:
+        logger.debug("[ws] broadcast reminder.deleted failed: %s", e)
     return {"ok": True}
 
 
@@ -843,7 +900,12 @@ async def create_contact(payload: ContactCreate, current=Depends(get_current_use
         "created_at": now,
     }
     await db.contacts.insert_one(doc)
-    return ContactOut(**{k: v for k, v in doc.items() if k != "_id"})
+    out = ContactOut(**{k: v for k, v in doc.items() if k != "_id"})
+    try:
+        await broadcast_to_user(current["id"], {"type": "contact.created", "data": out.model_dump()})
+    except Exception as e:
+        logger.debug("[ws] broadcast contact.created failed: %s", e)
+    return out
 
 
 @api.get("/contacts", response_model=List[ContactOut])
@@ -857,6 +919,10 @@ async def delete_contact(cid: str, current=Depends(get_current_user)):
     res = await db.contacts.delete_one({"id": cid, "user_id": current["id"]})
     if res.deleted_count == 0:
         raise HTTPException(404, "Contact not found")
+    try:
+        await broadcast_to_user(current["id"], {"type": "contact.deleted", "data": {"id": cid}})
+    except Exception as e:
+        logger.debug("[ws] broadcast contact.deleted failed: %s", e)
     return {"ok": True}
 
 
@@ -1054,10 +1120,83 @@ async def ws_web_session(websocket: WebSocket, session_id: str):
 
 app.include_router(api)
 
+
+# =====================================================================
+# Real-time user WebSocket — broadcasts reminder/contact events to every
+# signed-in client (web + mobile) for the authenticated user.
+# =====================================================================
+@app.websocket("/api/ws/user")
+async def ws_user(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    user_id: Optional[str] = None
+    if token:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+            user_id = payload.get("sub")
+        except jwt.PyJWTError:
+            user_id = None
+    user = None
+    if user_id:
+        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not user:
+        # Accept first so the client receives a structured close with code 4401
+        await websocket.accept()
+        try:
+            await websocket.send_json({"type": "error", "code": "invalid_token"})
+        except Exception:
+            pass
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    _user_sockets.setdefault(user_id, set()).add(websocket)
+    logger.info("[ws/user] connected user=%s (total=%d)", user_id, len(_user_sockets[user_id]))
+
+    ping_task: Optional[asyncio.Task] = None
+
+    async def _pinger():
+        try:
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+        except asyncio.CancelledError:
+            pass
+
+    try:
+        await websocket.send_json({"type": "hello", "user_id": user_id})
+        ping_task = asyncio.create_task(_pinger())
+        while True:
+            # Receive any client message (typically pong); just keep socket alive.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("[ws/user] error for %s: %s", user_id, e)
+    finally:
+        if ping_task and not ping_task.done():
+            ping_task.cancel()
+        try:
+            _user_sockets.get(user_id, set()).discard(websocket)
+            if user_id in _user_sockets and not _user_sockets[user_id]:
+                _user_sockets.pop(user_id, None)
+        except Exception:
+            pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    # Use regex (echoes the request's Origin) instead of "*", because the
+    # CORS spec forbids wildcard origin together with credentials=True.
+    # This safely allows the Emergent preview URLs, localhost, and the web app.
+    allow_origin_regex=r".*",
     allow_methods=["*"],
     allow_headers=["*"],
 )

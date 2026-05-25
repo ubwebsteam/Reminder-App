@@ -17,9 +17,17 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.uditbangra.remindly",
+      "buildNumber": "1",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSUserNotificationsUsageDescription": "Send you timely reminders you set.",
-        "NSCameraUsageDescription": "Scan QR codes to sign in on Rymind Web."
+        "NSCameraUsageDescription": "Scan QR codes to sign in on Rymind Web.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {

@@ -1,0 +1,27 @@
+name: Mirror to Friend's Repo
+
+on:
+  push:
+    branches:
+      - main          # change to 'master' if your default branch is master
+  workflow_dispatch:  # allows manual trigger from GitHub UI
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # IMPORTANT: needed for full history mirror
+
+      - name: Push to friend's repo
+        env:
+          FRIEND_TOKEN: ${{ secrets.FRIEND_REPO_TOKEN }}
+          FRIEND_URL: ${{ vars.FRIEND_REPO_URL }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add friend "https://x-access-token:${FRIEND_TOKEN}@${FRIEND_URL}"
+          git push friend --all --force
+          git push friend --tags --force

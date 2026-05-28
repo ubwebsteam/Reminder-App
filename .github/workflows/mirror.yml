@@ -21,4 +21,5 @@ jobs:
           MIRROR_TOKEN: ${{ secrets.RYMIND_MIRROR_TOKEN }}
           MIRROR_REPO: ${{ secrets.MIRROR_REPO_URL }}
         run: |
+          echo "MIRROR_REPO=$MIRROR_REPO"
           git push --mirror "https://x:${MIRROR_TOKEN}@${MIRROR_REPO#https://}"

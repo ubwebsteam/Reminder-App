@@ -24,7 +24,7 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://remind-everywhere.preview.emergentagent.com"
+        "EXPO_PUBLIC_BACKEND_URL": "https://reminder-app-production-ce1f.up.railway.app"
       },
       "android": {
         "buildType": "apk"
@@ -37,7 +37,7 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://YOUR-PRODUCTION-DOMAIN.com"
+        "EXPO_PUBLIC_BACKEND_URL": "https://reminder-app-production-ce1f.up.railway.app"
       },
       "android": {
         "buildType": "app-bundle"

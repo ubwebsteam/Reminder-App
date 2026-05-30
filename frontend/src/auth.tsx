@@ -21,6 +21,8 @@ type Ctx = {
     password: string;
     full_name: string;
     country_code: string;
+    phone_verify_token: string;
+    email_verify_token: string;
   }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -67,7 +69,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshPushTokenAfterAuth().catch(() => {});
   };
 
-  const signup = async (d: any) => {
+  const signup = async (d: {
+    email: string;
+    phone: string;
+    password: string;
+    full_name: string;
+    country_code: string;
+    phone_verify_token: string;
+    email_verify_token: string;
+  }) => {
     const res = await apiFetch<{ access_token: string; user: User }>("/auth/signup", {
       method: "POST",
       auth: false,

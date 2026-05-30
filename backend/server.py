@@ -8,6 +8,7 @@ Features:
 - Graceful fallback when 3rd-party credentials are absent
 """
 import os
+import random
 import re
 import logging
 import asyncio
@@ -91,6 +92,20 @@ class UserSignup(BaseModel):
     password: str = Field(..., min_length=6)
     full_name: str = Field(..., min_length=1)
     country_code: str = Field(default="+91")
+    phone_verify_token: str = Field(..., min_length=1)
+    email_verify_token: str = Field(..., min_length=1)
+
+
+class SendCodeIn(BaseModel):
+    target: Literal["phone", "email"]
+    value: str = Field(..., min_length=3)
+    country_code: str = Field(default="+91")
+
+
+class VerifyCodeIn(BaseModel):
+    target: Literal["phone", "email"]
+    value: str = Field(..., min_length=3)
+    code: str = Field(..., min_length=6, max_length=6)
 
 
 class UserLogin(BaseModel):
@@ -596,6 +611,8 @@ async def lifespan(app: FastAPI):
     await db.users.create_index("phone_suffix")
     await db.reminders.create_index("user_id")
     await db.contacts.create_index("user_id")
+    # Verification codes auto-expire after 10 minutes
+    await db.verification_codes.create_index("created_at", expireAfterSeconds=600)
     # Migration: backfill phone_suffix on existing users
     async for u in db.users.find({"phone_suffix": {"$exists": False}}, {"_id": 0, "id": 1, "phone_full": 1, "phone": 1}):
         suffix = _phone_suffix(u.get("phone_full") or u.get("phone"))
@@ -683,17 +700,133 @@ async def health():
     }
 
 
-# ------- Auth -------
+# ------- Auth — Verification -------
+def _generate_verify_code() -> str:
+    return str(random.randint(100000, 999999))
+
+
+def _create_verify_token(target: str, value: str) -> str:
+    """Short-lived JWT proving the user verified their phone/email."""
+    payload = {
+        f"{target}_verified": value,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        "iat": datetime.now(timezone.utc),
+        "purpose": "signup_verify",
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def _decode_verify_token(token: str, target: str, expected_value: str) -> bool:
+    """Validate a verification JWT matches the expected target+value."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        if payload.get("purpose") != "signup_verify":
+            return False
+        return payload.get(f"{target}_verified") == expected_value
+    except jwt.PyJWTError:
+        return False
+
+
+def _verification_email_html(code: str) -> str:
+    return f"""
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;background:#F8F9F7;padding:32px 16px">
+      <div style="background:#fff;border-radius:16px;padding:32px;border:1px solid #E5E7E0">
+        <div style="text-align:center;margin-bottom:24px">
+          <div style="background:#2A4B41;color:#fff;display:inline-block;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:1.5px">RYMIND</div>
+        </div>
+        <h1 style="font-size:22px;color:#1B1F1A;margin:0 0 8px;text-align:center;letter-spacing:-0.5px">Verify your email</h1>
+        <p style="color:#4A5147;font-size:15px;line-height:1.55;text-align:center;margin:0 0 24px">Enter this code in the Rymind app to verify your email address.</p>
+        <div style="background:#F0F5F2;border-radius:12px;padding:20px;text-align:center;margin:0 0 24px">
+          <span style="font-size:36px;font-weight:800;letter-spacing:8px;color:#2A4B41">{code}</span>
+        </div>
+        <p style="color:#6B756E;font-size:13px;text-align:center;margin:0 0 8px">This code expires in <strong>10 minutes</strong>.</p>
+        <p style="color:#94978F;font-size:11px;margin-top:24px;text-align:center">If you didn't request this code, you can safely ignore this email.</p>
+      </div>
+      <p style="color:#94978F;font-size:11px;margin-top:16px;text-align:center">&copy; Rymind &middot; rymind.in</p>
+    </div>
+    """.strip()
+
+
+@api.post("/auth/send-code")
+async def send_verification_code(payload: SendCodeIn):
+    target = payload.target
+    value = payload.value.strip()
+    if not value:
+        raise HTTPException(400, "Value is required")
+
+    # Rate limit: max 5 codes per target+value per hour
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    recent_count = await db.verification_codes.count_documents({
+        "target": target,
+        "value": value,
+        "created_at": {"$gte": one_hour_ago},
+    })
+    if recent_count >= 5:
+        raise HTTPException(429, "Too many code requests. Please wait and try again.")
+
+    code = _generate_verify_code()
+    await db.verification_codes.insert_one({
+        "target": target,
+        "value": value,
+        "code": code,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    if target == "phone":
+        phone_full = value if value.startswith("+") else f"{payload.country_code}{re.sub(r'[^0-9]', '', value)}"
+        sms_body = f"Your Rymind verification code is: {code}. Valid for 10 minutes."
+        sent = await send_sms(phone_full, sms_body)
+        if not sent:
+            logger.info("[verify] SMS code for %s: %s (mock/failed)", phone_full, code)
+    elif target == "email":
+        email_lower = value.lower()
+        html = _verification_email_html(code)
+        sent = await send_email(email_lower, "Your Rymind verification code", html)
+        if not sent:
+            logger.info("[verify] Email code for %s: %s (mock/failed)", email_lower, code)
+
+    return {"ok": True, "message": "Verification code sent"}
+
+
+@api.post("/auth/verify-code")
+async def verify_code(payload: VerifyCodeIn):
+    target = payload.target
+    value = payload.value.strip()
+    code = payload.code.strip()
+
+    # Find the most recent code for this target+value
+    doc = await db.verification_codes.find_one(
+        {"target": target, "value": value},
+        sort=[("created_at", -1)],
+    )
+    if not doc or doc.get("code") != code:
+        return {"ok": False, "verified": False, "message": "Invalid or expired code"}
+
+    # Code matches — issue a short-lived verification token
+    token = _create_verify_token(target, value)
+    # Clean up used codes for this target+value
+    await db.verification_codes.delete_many({"target": target, "value": value})
+    return {"ok": True, "verified": True, "token": token}
+
+
+# ------- Auth — Signup & Login -------
 @api.post("/auth/signup", response_model=TokenOut)
 async def signup(payload: UserSignup):
     email = payload.email.lower().strip()
-    existing = await db.users.find_one({"email": email})
-    if existing:
-        raise HTTPException(400, "Email already registered")
     phone_raw = re.sub(r"[^\d]", "", payload.phone)
     if not phone_raw:
         raise HTTPException(400, "Invalid phone number")
     phone_full = f"{payload.country_code}{phone_raw}"
+
+    # Validate verification tokens
+    if not _decode_verify_token(payload.phone_verify_token, "phone", phone_full):
+        raise HTTPException(400, "Phone number not verified. Please verify your phone first.")
+    if not _decode_verify_token(payload.email_verify_token, "email", email):
+        raise HTTPException(400, "Email not verified. Please verify your email first.")
+
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(400, "Email already registered")
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     doc = {

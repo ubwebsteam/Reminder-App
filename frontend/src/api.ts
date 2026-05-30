@@ -37,9 +37,27 @@ export async function apiFetch<T = any>(
     body = text;
   }
   if (!res.ok) {
-    const msg =
-      (body && (body.detail || body.message)) || `Request failed (${res.status})`;
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    let msg = `Request failed (${res.status})`;
+    if (body) {
+      const detail = body.detail;
+      if (typeof detail === "string") {
+        msg = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        // FastAPI / Pydantic validation errors — extract human-readable messages
+        msg = detail
+          .map((e: any) => {
+            const field = Array.isArray(e.loc)
+              ? e.loc.filter((l: any) => l !== "body").join(" → ")
+              : "";
+            const m = e.msg || "Invalid value";
+            return field ? `${field}: ${m}` : m;
+          })
+          .join(". ");
+      } else if (body.message) {
+        msg = typeof body.message === "string" ? body.message : JSON.stringify(body.message);
+      }
+    }
+    throw new Error(msg);
   }
   return body as T;
 }

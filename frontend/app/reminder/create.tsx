@@ -126,8 +126,11 @@ export default function CreateReminder() {
       if (finalDateTime.getTime() < Date.now() - 60000) {
         return "Scheduled time is in the past.";
       }
-      if (!(parseInt(repeatCount) >= 1)) return "Repeat count must be at least 1.";
-      if (!(computeRepeatHours() > 0)) return "Repeat interval must be > 0.";
+      const rc = parseInt(repeatCount);
+      if (!(rc >= 1)) return "Repeat count must be at least 1.";
+      if (rc > 50) return "Repeat count can't exceed 50.";
+      if (!(computeRepeatHours() > 0)) return "Repeat interval must be greater than 0.";
+      if (computeRepeatHours() < 0.0167) return "Repeat interval must be at least 1 minute.";
     } else if (step === 2) {
       if (channels.length === 0) return "Select at least one delivery method.";
     } else if (step === 3) {

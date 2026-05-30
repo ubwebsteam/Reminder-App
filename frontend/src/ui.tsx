@@ -60,6 +60,7 @@ export function Button({
           opacity: disabled ? 0.55 : 1,
           height: 54,
           borderRadius: radius.pill,
+          paddingHorizontal: 20,
           alignItems: "center",
           justifyContent: "center",
           flexDirection: "row",
@@ -81,7 +82,7 @@ export function Button({
               color: fg,
               fontSize: 16,
               fontWeight: "600",
-              paddingHorizontal: 16,
+              paddingHorizontal: icon ? 4 : 16,
               flexShrink: 1,
             }}
           >

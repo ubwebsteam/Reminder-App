@@ -612,6 +612,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Remindly API", lifespan=lifespan)
+
+# ---------------- CORS ----------------
+_cors_origins = [
+    o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 api = APIRouter(prefix="/api")
 
 

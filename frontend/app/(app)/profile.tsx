@@ -69,7 +69,7 @@ export default function Profile() {
           />
         </View>
 
-        <Text style={styles.footer}>Remindly · v1.0.0</Text>
+        <Text style={styles.footer}>Rymind · v1.0.0</Text>
       </ScrollView>
     </SafeAreaView>
   );

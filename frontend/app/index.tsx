@@ -46,7 +46,7 @@ export default function Splash() {
         <View style={styles.logoWrap}>
           <Image source={require("../assets/images/icon.png")} style={styles.logoImg} resizeMode="cover" />
         </View>
-        <Text style={styles.brand}>Remindly</Text>
+        <Text style={styles.brand}>Rymind</Text>
         <Text style={styles.tag}>Never miss what matters.</Text>
       </Animated.View>
 

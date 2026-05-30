@@ -506,7 +506,7 @@ async def _fire_reminder(reminder_id: str) -> None:
         <h1 style=\"font-size:24px;color:#1B1F1A;margin:16px 0 8px;letter-spacing:-0.5px\">{title}</h1>
         <p style=\"color:#4A5147;font-size:15px;line-height:1.55;white-space:pre-wrap;margin:0 0 24px\">{msg}</p>
         <div style=\"background:#EAF2EE;border-radius:10px;padding:14px 16px;color:#2A4B41;font-size:13px;font-weight:600\">⏰ Triggered: {when_str}</div>
-        <p style=\"color:#94978F;font-size:11px;margin-top:24px;text-align:center\">Sent automatically by Remindly · You created this reminder for yourself.</p>
+        <p style=\"color:#94978F;font-size:11px;margin-top:24px;text-align:center\">Sent automatically by Rymind · You created this reminder for yourself.</p>
       </div>
     </div>
     """.strip()
@@ -605,13 +605,13 @@ async def lifespan(app: FastAPI):
     # reschedule all active reminders
     async for r in db.reminders.find({"status": {"$in": ["pending", "active"]}}, {"_id": 0}):
         await _schedule_reminder_job(r)
-    logger.info("Remindly started. Scheduler running.")
+    logger.info("Rymind started. Scheduler running.")
     yield
     scheduler.shutdown(wait=False)
     client.close()
 
 
-app = FastAPI(title="Remindly API", lifespan=lifespan)
+app = FastAPI(title="Rymind API", lifespan=lifespan)
 
 # ---------------- CORS ----------------
 _cors_origins = [
@@ -668,7 +668,7 @@ def _reminder_to_out(r: dict) -> ReminderOut:
 # ---------------- Routes ----------------
 @api.get("/")
 async def root():
-    return {"app": "Remindly", "status": "ok"}
+    return {"app": "Rymind", "status": "ok"}
 
 
 @api.get("/health")

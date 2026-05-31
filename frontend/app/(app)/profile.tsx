@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -69,6 +69,19 @@ export default function Profile() {
             }}
             testID="logout-btn"
           />
+        </View>
+
+        <View style={{ marginTop: spacing.lg }}>
+          <SectionTitle>Legal</SectionTitle>
+          <Card>
+            <TouchableOpacity activeOpacity={0.7} onPress={() => Linking.openURL("https://www.rymind.in/privacy-policy")} testID="open-privacy-policy">
+              <Row icon="document-text-outline" label="Privacy Policy" chevron />
+            </TouchableOpacity>
+            <Divider />
+            <TouchableOpacity activeOpacity={0.7} onPress={() => Linking.openURL("https://www.rymind.in/terms-of-service")} testID="open-terms">
+              <Row icon="reader-outline" label="Terms of Service" chevron />
+            </TouchableOpacity>
+          </Card>
         </View>
 
         {/* Danger Zone — Delete Account */}

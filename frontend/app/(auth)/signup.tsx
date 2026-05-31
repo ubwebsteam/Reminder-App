@@ -10,6 +10,7 @@ import {
   Image,
   TextInput,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -426,6 +427,18 @@ export default function Signup() {
               testID="signup-submit"
             />
 
+            <Text style={styles.legalText}>
+              By creating an account, you agree to our{" "}
+              <Text style={styles.legalLink} onPress={() => Linking.openURL("https://www.rymind.in/privacy-policy")}>
+                Privacy Policy
+              </Text>
+              {" "}and{" "}
+              <Text style={styles.legalLink} onPress={() => Linking.openURL("https://www.rymind.in/terms-of-service")}>
+                Terms of Service
+              </Text>
+              .
+            </Text>
+
             {(!phoneVerified || !emailVerified) && name && phone && email && password.length >= 6 && (
               <Text style={styles.pendingHint}>
                 <Ionicons name="shield-checkmark-outline" size={13} color={colors.textMuted} />{" "}
@@ -591,5 +604,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     opacity: 0.85,
+  },
+  legalText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 14,
+    lineHeight: 18,
+  },
+  legalLink: {
+    color: colors.primary,
+    fontWeight: "600",
+    textDecorationLine: "underline",
   },
 });

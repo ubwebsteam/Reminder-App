@@ -1,15 +1,17 @@
-import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+import React, { useState } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
+import { apiFetch } from "../../src/api";
 import { Button, Card, SectionTitle } from "../../src/ui";
 import { colors, radius, spacing } from "../../src/theme";
 
 export default function Profile() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const [deleting, setDeleting] = useState(false);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
@@ -69,6 +71,62 @@ export default function Profile() {
           />
         </View>
 
+        {/* Danger Zone — Delete Account */}
+        <View style={{ marginTop: spacing.xl }}>
+          <SectionTitle>Danger Zone</SectionTitle>
+          <Card style={styles.dangerCard}>
+            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
+              <View style={styles.dangerIcon}>
+                <Ionicons name="warning" size={18} color={colors.danger} />
+              </View>
+              <Text style={styles.dangerTitle}>Delete Account</Text>
+            </View>
+            <Text style={styles.dangerDesc}>
+              Permanently delete your account and all associated data including reminders, contacts, history, and linked web sessions. This action cannot be undone.
+            </Text>
+            <TouchableOpacity
+              style={[styles.dangerBtn, deleting && { opacity: 0.5 }]}
+              disabled={deleting}
+              onPress={() => {
+                Alert.alert(
+                  "Delete your account?",
+                  "This will permanently delete your account, all reminders, contacts, history, and linked devices. This action CANNOT be undone.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Delete permanently",
+                      style: "destructive",
+                      onPress: async () => {
+                        setDeleting(true);
+                        try {
+                          await apiFetch("/auth/account", { method: "DELETE" });
+                          await logout();
+                          router.replace("/(auth)/login");
+                          Alert.alert("Account deleted", "Your account and all data have been permanently removed.");
+                        } catch (e: any) {
+                          Alert.alert("Error", e.message || "Failed to delete account. Please try again.");
+                        } finally {
+                          setDeleting(false);
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+              testID="delete-account-btn"
+            >
+              {deleting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="trash" size={16} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.dangerBtnText}>Delete my account</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </Card>
+        </View>
+
         <Text style={styles.footer}>Rymind · v1.0.0</Text>
       </ScrollView>
     </SafeAreaView>
@@ -108,4 +166,31 @@ const styles = StyleSheet.create({
   name: { fontSize: 20, fontWeight: "800", color: colors.text },
   meta: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
   footer: { color: colors.textMuted, fontSize: 12, textAlign: "center", marginTop: spacing.xxl },
+  dangerCard: {
+    borderWidth: 1,
+    borderColor: "rgba(220, 53, 69, 0.25)",
+    backgroundColor: "rgba(220, 53, 69, 0.04)",
+  },
+  dangerIcon: {
+    width: 34, height: 34, borderRadius: 10,
+    backgroundColor: "rgba(220, 53, 69, 0.1)",
+    alignItems: "center", justifyContent: "center", marginRight: 12,
+  },
+  dangerTitle: {
+    fontSize: 15, fontWeight: "700", color: colors.danger,
+  },
+  dangerDesc: {
+    fontSize: 12, color: colors.textMuted, lineHeight: 18, marginBottom: 14,
+  },
+  dangerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.danger,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+  },
+  dangerBtnText: {
+    color: "#fff", fontSize: 14, fontWeight: "700",
+  },
 });

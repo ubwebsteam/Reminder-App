@@ -866,6 +866,68 @@ async def set_push_token(body: PushTokenIn, current=Depends(get_current_user)):
     return {"ok": True}
 
 
+@api.delete("/auth/account")
+async def delete_account(current=Depends(get_current_user)):
+    """Permanently delete the authenticated user's account and ALL associated data."""
+    uid = current["id"]
+    logger.info("[account] deleting user %s (%s)", uid, current.get("email"))
+
+    # 1. Cancel all scheduled reminder jobs for this user
+    user_reminders = await db.reminders.find(
+        {"user_id": uid, "status": {"$in": ["pending", "active"]}},
+        {"_id": 0, "id": 1},
+    ).to_list(1000)
+    for r in user_reminders:
+        try:
+            scheduler.remove_job(_job_id(r["id"]))
+        except Exception:
+            pass
+
+    # 2. Delete all data from every collection
+    del_reminders = await db.reminders.delete_many({"user_id": uid})
+    del_contacts = await db.contacts.delete_many({"user_id": uid})
+    del_logs = await db.reminder_logs.delete_many(
+        {"reminder_id": {"$in": [r["id"] for r in user_reminders]}}
+    )
+    del_sessions = await db.web_sessions.delete_many({"user_id": uid})
+    del_codes = await db.verification_codes.delete_many(
+        {"$or": [{"value": current.get("email", "")}, {"value": current.get("phone_full", "")}]}
+    )
+
+    # 3. Delete the user record itself
+    await db.users.delete_one({"id": uid})
+
+    # 4. Disconnect any active WebSocket connections for this user
+    sockets = list(_user_sockets.pop(uid, set()))
+    for ws in sockets:
+        try:
+            await ws.send_json({"type": "account_deleted"})
+            await ws.close(code=4410)
+        except Exception:
+            pass
+
+    logger.info(
+        "[account] deleted user=%s reminders=%d contacts=%d logs=%d sessions=%d codes=%d",
+        uid,
+        del_reminders.deleted_count,
+        del_contacts.deleted_count,
+        del_logs.deleted_count,
+        del_sessions.deleted_count,
+        del_codes.deleted_count,
+    )
+
+    return {
+        "ok": True,
+        "message": "Account and all associated data permanently deleted",
+        "deleted": {
+            "reminders": del_reminders.deleted_count,
+            "contacts": del_contacts.deleted_count,
+            "logs": del_logs.deleted_count,
+            "web_sessions": del_sessions.deleted_count,
+        },
+    }
+
+
 # ------- Reminders -------
 @api.post("/reminders", response_model=ReminderOut)
 async def create_reminder(payload: ReminderCreate, current=Depends(get_current_user)):

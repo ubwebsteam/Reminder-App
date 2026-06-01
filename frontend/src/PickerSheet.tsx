@@ -1,17 +1,5 @@
-import React, { useRef, useState } from "react";
-import {
-  Modal,
-  View,
-  Text,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  StyleSheet,
-  Platform,
-  ScrollView,
-  Animated,
-  PanResponder,
-  Dimensions,
-} from "react-native";
+import React, { useState } from "react";
+import { Modal, View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing } from "./theme";
 import { Button } from "./ui";
@@ -25,9 +13,6 @@ type Props = {
   onConfirm: (d: Date) => void;
 };
 
-const SCREEN_HEIGHT = Dimensions.get("window").height;
-const DISMISS_THRESHOLD = 80;
-
 /**
  * Cross-platform date & time picker. On web we use simple spinners
  * (native <input> works poorly inside Expo web). On native we'd ideally
@@ -37,57 +22,6 @@ const DISMISS_THRESHOLD = 80;
 export function PickerSheet({ visible, initial, mode, onClose, onConfirm }: Props) {
   const [d, setD] = useState<Date>(initial || new Date());
   const insets = useSafeAreaInsets();
-
-  // Drag-to-dismiss
-  const translateY = useRef(new Animated.Value(0)).current;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 8 && Math.abs(gs.dy) > Math.abs(gs.dx),
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) {
-          translateY.setValue(gs.dy);
-        }
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > DISMISS_THRESHOLD || gs.vy > 0.5) {
-          Animated.timing(translateY, {
-            toValue: SCREEN_HEIGHT,
-            duration: 250,
-            useNativeDriver: true,
-          }).start(() => {
-            onClose();
-            translateY.setValue(0);
-          });
-        } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            bounciness: 8,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  const handleClose = () => {
-    Animated.timing(translateY, {
-      toValue: SCREEN_HEIGHT,
-      duration: 250,
-      useNativeDriver: true,
-    }).start(() => {
-      onClose();
-      translateY.setValue(0);
-    });
-  };
-
-  // Reset translateY when modal opens
-  React.useEffect(() => {
-    if (visible) {
-      translateY.setValue(0);
-    }
-  }, [visible]);
 
   const days = Array.from({ length: 31 }, (_, i) => i + 1);
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -107,52 +41,42 @@ export function PickerSheet({ visible, initial, mode, onClose, onConfirm }: Prop
   };
 
   return (
-    <Modal transparent animationType="slide" visible={visible} onRequestClose={handleClose}>
-      <TouchableWithoutFeedback onPress={handleClose}>
-        <View style={styles.overlay}>
-          <TouchableWithoutFeedback onPress={() => {}}>
-            <Animated.View
-              style={[
-                styles.sheet,
-                { paddingBottom: spacing.lg + Math.max(insets.bottom, 0), transform: [{ translateY }] },
-              ]}
-              {...panResponder.panHandlers}
-            >
-              <View style={styles.handle} />
-              <View style={styles.headerRow}>
-                <TouchableOpacity onPress={handleClose} testID="picker-cancel">
-                  <Text style={{ color: colors.textMuted, fontSize: 15 }}>Cancel</Text>
-                </TouchableOpacity>
-                <Text style={styles.title}>{mode === "date" ? "Pick date" : "Pick time"}</Text>
-                <View style={{ width: 50 }} />
-              </View>
+    <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
+      <View style={styles.overlay}>
+        <View style={[styles.sheet, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
+          <View style={styles.handle} />
+          <View style={styles.headerRow}>
+            <TouchableOpacity onPress={onClose} testID="picker-cancel">
+              <Text style={{ color: colors.textMuted, fontSize: 15 }}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.title}>{mode === "date" ? "Pick date" : "Pick time"}</Text>
+            <View style={{ width: 50 }} />
+          </View>
 
-              {mode === "date" ? (
-                <View style={styles.row}>
-                  <Wheel label="Day" items={days.map(String)} value={String(d.getDate())} onChange={(v) => set({ day: Number(v) })} />
-                  <Wheel label="Month" items={months} value={months[d.getMonth()]} onChange={(v) => set({ month: months.indexOf(v) })} />
-                  <Wheel label="Year" items={years.map(String)} value={String(d.getFullYear())} onChange={(v) => set({ year: Number(v) })} />
-                </View>
-              ) : (
-                <View style={styles.row}>
-                  <Wheel label="Hour" items={hours.map((x) => String(x).padStart(2, "0"))} value={String(d.getHours()).padStart(2, "0")} onChange={(v) => set({ hour: Number(v) })} />
-                  <Wheel label="Min" items={mins.map((x) => String(x).padStart(2, "0"))} value={String(d.getMinutes()).padStart(2, "0")} onChange={(v) => set({ minute: Number(v) })} />
-                </View>
-              )}
+          {mode === "date" ? (
+            <View style={styles.row}>
+              <Wheel label="Day" items={days.map(String)} value={String(d.getDate())} onChange={(v) => set({ day: Number(v) })} />
+              <Wheel label="Month" items={months} value={months[d.getMonth()]} onChange={(v) => set({ month: months.indexOf(v) })} />
+              <Wheel label="Year" items={years.map(String)} value={String(d.getFullYear())} onChange={(v) => set({ year: Number(v) })} />
+            </View>
+          ) : (
+            <View style={styles.row}>
+              <Wheel label="Hour" items={hours.map((x) => String(x).padStart(2, "0"))} value={String(d.getHours()).padStart(2, "0")} onChange={(v) => set({ hour: Number(v) })} />
+              <Wheel label="Min" items={mins.map((x) => String(x).padStart(2, "0"))} value={String(d.getMinutes()).padStart(2, "0")} onChange={(v) => set({ minute: Number(v) })} />
+            </View>
+          )}
 
-              <Button
-                label="Confirm"
-                onPress={() => {
-                  onConfirm(d);
-                  handleClose();
-                }}
-                testID="picker-confirm"
-                style={{ marginTop: spacing.md }}
-              />
-            </Animated.View>
-          </TouchableWithoutFeedback>
+          <Button
+            label="Confirm"
+            onPress={() => {
+              onConfirm(d);
+              onClose();
+            }}
+            testID="picker-confirm"
+            style={{ marginTop: spacing.md }}
+          />
         </View>
-      </TouchableWithoutFeedback>
+      </View>
     </Modal>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -6,13 +6,9 @@ import {
   FlatList,
   Modal,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   Platform,
   KeyboardAvoidingView,
   Alert,
-  Animated,
-  PanResponder,
-  Dimensions,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
@@ -23,9 +19,6 @@ import { Button, Card, Input } from "../../src/ui";
 
 type Contact = { id: string; name: string; phone?: string; email?: string };
 
-const SCREEN_HEIGHT = Dimensions.get("window").height;
-const DISMISS_THRESHOLD = 80;
-
 export default function Contacts() {
   const insets = useSafeAreaInsets();
   const tabBarSpace = 60 + Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 6) + 8;
@@ -35,55 +28,6 @@ export default function Contacts() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
-
-  // Drag-to-dismiss
-  const translateY = useRef(new Animated.Value(0)).current;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 8 && Math.abs(gs.dy) > Math.abs(gs.dx),
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) {
-          translateY.setValue(gs.dy);
-        }
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > DISMISS_THRESHOLD || gs.vy > 0.5) {
-          Animated.timing(translateY, {
-            toValue: SCREEN_HEIGHT,
-            duration: 250,
-            useNativeDriver: true,
-          }).start(() => {
-            setModal(false);
-            translateY.setValue(0);
-          });
-        } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            bounciness: 8,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  const openModal = () => {
-    translateY.setValue(0);
-    setModal(true);
-  };
-
-  const closeModal = () => {
-    Animated.timing(translateY, {
-      toValue: SCREEN_HEIGHT,
-      duration: 250,
-      useNativeDriver: true,
-    }).start(() => {
-      setModal(false);
-      translateY.setValue(0);
-    });
-  };
 
   const load = async () => {
     try {
@@ -102,7 +46,7 @@ export default function Contacts() {
         method: "POST",
         body: JSON.stringify({ name: name.trim(), phone: phone.trim() || null, email: email.trim() || null }),
       });
-      closeModal();
+      setModal(false);
       setName(""); setPhone(""); setEmail("");
       await load();
     } catch (e: any) {
@@ -129,7 +73,7 @@ export default function Contacts() {
           <Text style={styles.sub}>Saved contacts for quick reminders.</Text>
         </View>
         <TouchableOpacity
-          onPress={openModal}
+          onPress={() => setModal(true)}
           style={styles.addBtn}
           testID="add-contact-btn"
         >
@@ -164,49 +108,39 @@ export default function Contacts() {
         )}
       />
 
-      <Modal transparent animationType="slide" visible={modal} onRequestClose={closeModal}>
-        <TouchableWithoutFeedback onPress={closeModal}>
-          <View style={styles.overlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-                <Animated.View
-                  style={[
-                    styles.sheet,
-                    { paddingBottom: spacing.lg + Math.max(insets.bottom, 0), transform: [{ translateY }] },
-                  ]}
-                  {...panResponder.panHandlers}
-                >
-                  <View style={styles.handle} />
-                  <Text style={styles.sheetTitle}>New contact</Text>
-                  <Input label="Name" placeholder="Jane Doe" value={name} onChangeText={setName} testID="contact-name" />
-                  <Input
-                    label="Phone"
-                    placeholder="+91 9876543210"
-                    keyboardType="phone-pad"
-                    value={phone}
-                    onChangeText={setPhone}
-                    hint="Used to send reminders via WhatsApp or SMS."
-                    testID="contact-phone"
-                  />
-                  <Input
-                    label="Email"
-                    placeholder="jane@example.com"
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    value={email}
-                    onChangeText={setEmail}
-                    hint="Used to send reminders via email."
-                    testID="contact-email"
-                  />
-                  <Button label="Save contact" onPress={save} loading={saving} testID="contact-save" />
-                  <TouchableOpacity onPress={closeModal} style={{ alignItems: "center", marginTop: 10 }}>
-                    <Text style={{ color: colors.textMuted }}>Cancel</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-              </KeyboardAvoidingView>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+      <Modal transparent animationType="slide" visible={modal} onRequestClose={() => setModal(false)}>
+        <View style={styles.overlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+            <View style={[styles.sheet, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
+              <View style={styles.handle} />
+              <Text style={styles.sheetTitle}>New contact</Text>
+              <Input label="Name" placeholder="Jane Doe" value={name} onChangeText={setName} testID="contact-name" />
+              <Input
+                label="Phone"
+                placeholder="+91 9876543210"
+                keyboardType="phone-pad"
+                value={phone}
+                onChangeText={setPhone}
+                hint="Used to send reminders via WhatsApp or SMS."
+                testID="contact-phone"
+              />
+              <Input
+                label="Email"
+                placeholder="jane@example.com"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                value={email}
+                onChangeText={setEmail}
+                hint="Used to send reminders via email."
+                testID="contact-email"
+              />
+              <Button label="Save contact" onPress={save} loading={saving} testID="contact-save" />
+              <TouchableOpacity onPress={() => setModal(false)} style={{ alignItems: "center", marginTop: 10 }}>
+                <Text style={{ color: colors.textMuted }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
     </SafeAreaView>
   );

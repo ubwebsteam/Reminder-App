@@ -16,7 +16,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.uditbangra.remindly",
+      "bundleIdentifier": "com.ubwebs.remindly",
       "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false
@@ -31,7 +31,7 @@
       }
     },
     "android": {
-      "package": "com.uditbangra.remindly",
+      "package": "com.ubwebs.remindly",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#2258E5"

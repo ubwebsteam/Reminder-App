@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:669308456699:android:4de2d63eef90371fb82a5e",
+        "android_client_info": {
+          "package_name": "com.ubwebs.remindly"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA1nHvPpjpiDm4oJkVAoM0bMWD7gA_r5BE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:669308456699:android:bd983e23a4597326b82a5e",
         "android_client_info": {
           "package_name": "com.uditbangra.remindly"

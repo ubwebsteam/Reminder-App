@@ -841,6 +841,7 @@ async def signup(payload: UserSignup):
         "password_hash": hash_password(payload.password),
         "expo_push_token": None,
         "created_at": now,
+        "last_login_at": now,
     }
     await db.users.insert_one(doc)
     token = create_access_token(user_id)
@@ -852,6 +853,10 @@ async def login(payload: UserLogin):
     u = await db.users.find_one({"email": payload.email.lower().strip()})
     if not u or not verify_password(payload.password, u["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one({"id": u["id"]}, {"$set": {"last_login_at": now}})
+    
     token = create_access_token(u["id"])
     return TokenOut(access_token=token, user=_user_to_out(u))
 
@@ -1325,6 +1330,44 @@ async def ws_web_session(websocket: WebSocket, session_id: str):
             await websocket.close()
         except Exception:
             pass
+
+
+# ------- Admin Analytics -------
+@api.get("/admin/analytics")
+async def get_admin_analytics():
+    total_users = await db.users.count_documents({})
+    total_devices = await db.users.count_documents({"expo_push_token": {"$ne": None}})
+    
+    distribution_cursor = db.users.aggregate([
+        {"$group": {"_id": "$country_code", "count": {"$sum": 1}}}
+    ])
+    distribution = [{"region": d["_id"] or "Unknown", "count": d["count"]} for d in await distribution_cursor.to_list(100)]
+    
+    recent_users_cursor = db.users.find({}, {"_id": 0, "full_name": 1, "email": 1, "last_login_at": 1, "created_at": 1}).sort("last_login_at", -1).limit(50)
+    recent_users = await recent_users_cursor.to_list(50)
+    for u in recent_users:
+        if "last_login_at" not in u:
+            u["last_login_at"] = u.get("created_at")
+            
+    total_reminders = await db.reminders.count_documents({})
+    active_reminders = await db.reminders.count_documents({"status": {"$in": ["pending", "active"]}})
+    completed_reminders = await db.reminders.count_documents({"status": "completed"})
+    total_triggers = await db.reminder_logs.count_documents({})
+
+    return {
+        "users": {
+            "total": total_users,
+            "active_devices_downloads": total_devices,
+            "distribution": distribution,
+            "recent_logins": recent_users
+        },
+        "reminders": {
+            "total": total_reminders,
+            "active": active_reminders,
+            "completed": completed_reminders,
+            "total_triggers": total_triggers
+        }
+    }
 
 
 app.include_router(api)

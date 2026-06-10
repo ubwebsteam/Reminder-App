@@ -150,7 +150,7 @@ class ReminderCreate(BaseModel):
     scheduled_at: str  # ISO string with timezone
     timezone: str = "UTC"
     channels: List[Channel]
-    repeat_count: int = Field(default=1, ge=1, le=50)
+    repeat_count: int = Field(default=1, ge=-1, le=9999)
     repeat_interval_hours: float = Field(default=24, ge=0.0167)  # min 1 minute
     lead_minutes: int = Field(default=0, ge=0)  # reminder N minutes before
     target: ReminderTarget
@@ -395,7 +395,8 @@ def _compute_next_fire(r: dict) -> Optional[datetime]:
     lead = timedelta(minutes=r.get("lead_minutes", 0))
     first = base - lead
     triggered = r.get("triggered_count", 0)
-    if triggered >= r.get("repeat_count", 1):
+    repeat_count = r.get("repeat_count", 1)
+    if repeat_count != -1 and triggered >= repeat_count:
         return None
     interval = timedelta(hours=float(r.get("repeat_interval_hours", 24)))
     return first + interval * triggered
@@ -572,11 +573,11 @@ async def _fire_reminder(reminder_id: str) -> None:
     }
     await db.reminder_logs.insert_one(log_entry)
 
-    # Completion logic:
-    # - self: complete when triggered_count reaches repeat_count
+    # - self: complete when triggered_count reaches repeat_count (if not unlimited)
     # - other: never auto-complete; user must tap Send for each pending channel
     if is_self:
-        if new_triggered >= r.get("repeat_count", 1):
+        repeat_count = r.get("repeat_count", 1)
+        if repeat_count != -1 and new_triggered >= repeat_count:
             update["status"] = "completed"
             update["next_fire_at"] = None
 
@@ -588,7 +589,7 @@ async def _fire_reminder(reminder_id: str) -> None:
         updated
         and updated.get("status") in ("pending", "active")
         and is_self
-        and new_triggered < r.get("repeat_count", 1)
+        and (r.get("repeat_count", 1) == -1 or new_triggered < r.get("repeat_count", 1))
     ):
         await _schedule_reminder_job(updated)
 

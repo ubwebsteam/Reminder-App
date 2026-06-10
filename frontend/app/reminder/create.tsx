@@ -43,8 +43,9 @@ export default function CreateReminder() {
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
   const [repeatCount, setRepeatCount] = useState("1");
-  const [repeatUnit, setRepeatUnit] = useState<"min" | "hour" | "day">("hour");
+  const [repeatUnit, setRepeatUnit] = useState<"min" | "hour" | "day" | "week" | "month">("hour");
   const [repeatValue, setRepeatValue] = useState("24");
+  const [isUnlimited, setIsUnlimited] = useState(false);
 
   // Step 3
   const [channels, setChannels] = useState<Channel[]>(["push"]);
@@ -83,8 +84,13 @@ export default function CreateReminder() {
         setMessage(r.message || "");
         setChannels((r.channels || ["push"]) as Channel[]);
         setRepeatCount(String(r.repeat_count ?? 1));
+        if (r.repeat_count === -1) setIsUnlimited(true);
         const hours = r.repeat_interval_hours ?? 24;
-        if (hours < 1) {
+        if (hours === 168) {
+          setRepeatUnit("week");
+        } else if (hours === 720) {
+          setRepeatUnit("month");
+        } else if (hours < 1) {
           setRepeatUnit("min");
           setRepeatValue(String(Math.round(hours * 60)));
         } else if (hours % 24 === 0 && hours >= 24) {
@@ -111,6 +117,8 @@ export default function CreateReminder() {
   };
 
   const computeRepeatHours = () => {
+    if (repeatUnit === "week") return 168;
+    if (repeatUnit === "month") return 720;
     const v = parseFloat(repeatValue) || 0;
     if (repeatUnit === "min") return v / 60;
     if (repeatUnit === "hour") return v;
@@ -126,9 +134,11 @@ export default function CreateReminder() {
       if (finalDateTime.getTime() < Date.now() - 60000) {
         return "Scheduled time is in the past.";
       }
-      const rc = parseInt(repeatCount);
-      if (!(rc >= 1)) return "Repeat count must be at least 1.";
-      if (rc > 50) return "Repeat count can't exceed 50.";
+      if (!isUnlimited) {
+        const rc = parseInt(repeatCount);
+        if (!(rc >= 1)) return "Repeat count must be at least 1.";
+        if (rc > 50) return "Repeat count can't exceed 50.";
+      }
       if (!(computeRepeatHours() > 0)) return "Repeat interval must be greater than 0.";
       if (computeRepeatHours() < 0.0167) return "Repeat interval must be at least 1 minute.";
     } else if (step === 2) {
@@ -162,7 +172,7 @@ export default function CreateReminder() {
         scheduled_at: finalDateTime.toISOString(),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         channels,
-        repeat_count: parseInt(repeatCount) || 1,
+        repeat_count: isUnlimited ? -1 : (parseInt(repeatCount) || 1),
         repeat_interval_hours: computeRepeatHours(),
         lead_minutes: 0,
         target: {
@@ -252,36 +262,44 @@ export default function CreateReminder() {
               </View>
 
               <Text style={[styles.label, { marginTop: spacing.lg }]}>Repeat</Text>
-              <View style={{ flexDirection: "row" }}>
-                <Input
-                  label="Count"
-                  placeholder="1"
-                  keyboardType="numeric"
-                  value={repeatCount}
-                  onChangeText={setRepeatCount}
-                  style={{ flex: 1 }}
-                  testID="wizard-repeat-count"
-                />
-                <View style={{ width: 12 }} />
-                <Input
-                  label={`Every (${repeatUnit === "min" ? "minutes" : repeatUnit === "hour" ? "hours" : "days"})`}
-                  placeholder="24"
-                  keyboardType="numeric"
-                  value={repeatValue}
-                  onChangeText={setRepeatValue}
-                  style={{ flex: 1 }}
-                  testID="wizard-repeat-value"
-                />
-              </View>
-              <View style={{ flexDirection: "row", marginTop: 4 }}>
-                {(["min", "hour", "day"] as const).map((u) => (
+              {!isUnlimited && (
+                <View style={{ flexDirection: "row" }}>
+                  <Input
+                    label="Count"
+                    placeholder="1"
+                    keyboardType="numeric"
+                    value={repeatCount}
+                    onChangeText={setRepeatCount}
+                    style={{ flex: 1 }}
+                    testID="wizard-repeat-count"
+                  />
+                  {repeatUnit !== "week" && repeatUnit !== "month" && (
+                    <>
+                      <View style={{ width: 12 }} />
+                      <Input
+                        label={`Every (${repeatUnit === "min" ? "minutes" : repeatUnit === "hour" ? "hours" : "days"})`}
+                        placeholder="24"
+                        keyboardType="numeric"
+                        value={repeatValue}
+                        onChangeText={setRepeatValue}
+                        style={{ flex: 1 }}
+                        testID="wizard-repeat-value"
+                      />
+                    </>
+                  )}
+                </View>
+              )}
+              <View style={{ flexDirection: "row", marginTop: 4, flexWrap: "wrap" }}>
+                {(["min", "hour", "day", "week", "month"] as const).map((u) => (
                   <Chip
                     key={u}
-                    label={u === "min" ? "Minutes" : u === "hour" ? "Hours" : "Days"}
+                    label={u === "min" ? "Minutes" : u === "hour" ? "Hours" : u === "day" ? "Days" : u === "week" ? "Weekly" : "Monthly"}
                     selected={repeatUnit === u}
                     onPress={() => {
                       setRepeatUnit(u);
                       // sensible defaults when switching unit
+                      if (u === "week") setRepeatValue("168");
+                      if (u === "month") setRepeatValue("720");
                       if (u === "min" && (parseFloat(repeatValue) || 0) > 60) setRepeatValue("30");
                       if (u === "hour") setRepeatValue((prev) => (parseFloat(prev) || 0) > 48 ? "24" : prev);
                     }}
@@ -289,6 +307,17 @@ export default function CreateReminder() {
                   />
                 ))}
               </View>
+
+              <TouchableOpacity
+                style={[styles.checkRow, { marginTop: spacing.md }]}
+                onPress={() => setIsUnlimited(!isUnlimited)}
+                testID="unlimited-toggle"
+              >
+                <View style={[styles.checkbox, isUnlimited && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
+                  {isUnlimited && <Ionicons name="infinite" size={14} color="#fff" />}
+                </View>
+                <Text style={{ color: colors.text, fontWeight: "600" }}>Repeat forever (until I stop it)</Text>
+              </TouchableOpacity>
               <Card style={{ flexDirection: "row", alignItems: "center", backgroundColor: colors.primaryTint, borderColor: "transparent", marginTop: spacing.md }}>
                 <Ionicons name="flash" size={18} color={colors.primary} />
                 <Text style={{ marginLeft: 8, color: colors.text, flex: 1 }}>
@@ -352,6 +381,15 @@ export default function CreateReminder() {
                 <Chip label="Myself" selected={isSelf} onPress={() => { setIsSelf(true); setContactId(null); }} icon="person-outline" testID="target-self" />
                 <Chip label="Someone else" selected={!isSelf} onPress={() => setIsSelf(false)} icon="people-outline" testID="target-other" />
               </View>
+
+              {isSelf && (
+                <Card style={{ backgroundColor: colors.primaryTint, borderColor: "transparent", flexDirection: "row", alignItems: "center" }}>
+                  <Ionicons name="information-circle" size={24} color={colors.primary} />
+                  <Text style={{ marginLeft: 10, color: colors.text, flex: 1, fontSize: 13, lineHeight: 20 }}>
+                    The reminder will be sent directly to you through the delivery method you selected (such as notifications, email, etc.).
+                  </Text>
+                </Card>
+              )}
 
               {!isSelf && (
                 <>

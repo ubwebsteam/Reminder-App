@@ -189,7 +189,7 @@ export default function ReminderDetail() {
             </>
           )}
           <Divider />
-          <Row icon="repeat-outline" label="Repeats" value={`${r.triggered_count}/${r.repeat_count} times · every ${r.repeat_interval_hours}h`} />
+          <Row icon="repeat-outline" label="Repeats" value={`${r.triggered_count}/${r.repeat_count === -1 ? "∞" : r.repeat_count} times · every ${r.repeat_interval_hours}h`} />
           {r.lead_minutes > 0 && (
             <>
               <Divider />
@@ -258,7 +258,7 @@ export default function ReminderDetail() {
           <View style={{ marginTop: spacing.lg, gap: 10 }}>
             <Button label="Mark as completed" icon="checkmark-done" onPress={() => action("complete")} testID="action-complete" />
             <Button label="Postpone 30 min" variant="secondary" icon="time" onPress={() => action("postpone", 30)} testID="action-postpone" />
-            <Button label="Cancel reminder" variant="danger" icon="close-circle" onPress={() => action("cancel")} testID="action-cancel" />
+            <Button label={r.repeat_count === -1 ? "Stop Reminder" : "Cancel reminder"} variant="danger" icon={r.repeat_count === -1 ? "stop-circle" : "close-circle"} onPress={() => action("cancel")} testID="action-cancel" />
           </View>
         )}
       </ScrollView>

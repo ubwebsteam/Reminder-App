@@ -126,9 +126,7 @@ export default function Dashboard() {
                       key={item.id}
                       testID={`reminder-card-${item.id}`}
                       onPress={() => router.push({ pathname: "/reminder/[id]", params: { id: item.id } })}
-                      style={[
-                        { marginBottom: 12, borderColor: colors.warning, borderWidth: 1.5, backgroundColor: "#FFFBF2" },
-                      ]}
+                      style={{ marginBottom: 12, borderColor: colors.warning, borderWidth: 1.5, backgroundColor: "#FFFBF2" }}
                     >
                       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                         <Text style={styles.cardTitle} numberOfLines={1}>

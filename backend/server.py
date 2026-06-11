@@ -481,10 +481,11 @@ async def _fire_reminder(reminder_id: str) -> None:
                     msg,
                     {"reminder_id": reminder_id, "from_user_id": user["id"]},
                 )
-                # Owner gets a complementary "tap to send the rest" notification
+                # Owner gets the reminder too, plus a "tap to send the rest" hint
                 if user.get("expo_push_token"):
                     owner_body = (
-                        f"Notification delivered to {target.get('name') or 'them'}. "
+                        f"(For {target.get('name') or 'them'}) {msg}\n"
+                        f"Delivered to {target.get('name') or 'them'}. "
                         f"Tap Send for WhatsApp/SMS/Email if selected."
                     )
                     await send_expo_push(
@@ -513,19 +514,22 @@ async def _fire_reminder(reminder_id: str) -> None:
     fired_local = datetime.now(timezone.utc).astimezone(local_tz)
     when_str = fired_local.strftime("%a, %d %b %Y · %I:%M %p")
 
-    wa_body = f"*⏰ {title}*\n{msg}\n\n_Triggered: {when_str}_"
-    sms_body = f"⏰ {title}: {msg} ({when_str})"
-    email_html = f"""
+    def _email_html(body_msg: str, footer_note: str) -> str:
+        return f"""
     <div style=\"font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;background:#F8F9F7;padding:32px 16px\">
       <div style=\"background:#fff;border-radius:16px;padding:32px;border:1px solid #E5E7E0\">
         <div style=\"background:#2A4B41;color:#fff;display:inline-block;padding:6px 12px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:1.2px\">REMINDER</div>
         <h1 style=\"font-size:24px;color:#1B1F1A;margin:16px 0 8px;letter-spacing:-0.5px\">{title}</h1>
-        <p style=\"color:#4A5147;font-size:15px;line-height:1.55;white-space:pre-wrap;margin:0 0 24px\">{msg}</p>
+        <p style=\"color:#4A5147;font-size:15px;line-height:1.55;white-space:pre-wrap;margin:0 0 24px\">{body_msg}</p>
         <div style=\"background:#EAF2EE;border-radius:10px;padding:14px 16px;color:#2A4B41;font-size:13px;font-weight:600\">⏰ Triggered: {when_str}</div>
-        <p style=\"color:#94978F;font-size:11px;margin-top:24px;text-align:center\">Sent automatically by Rymind · You created this reminder for yourself.</p>
+        <p style=\"color:#94978F;font-size:11px;margin-top:24px;text-align:center\">Sent automatically by Rymind · {footer_note}</p>
       </div>
     </div>
     """.strip()
+
+    wa_body = f"*⏰ {title}*\n{msg}\n\n_Triggered: {when_str}_"
+    sms_body = f"⏰ {title}: {msg} ({when_str})"
+    email_html = _email_html(msg, "You created this reminder for yourself.")
 
     for ch in ("whatsapp", "sms", "email"):
         if ch not in channels:
@@ -551,7 +555,34 @@ async def _fire_reminder(reminder_id: str) -> None:
                 results[ch] = False
                 logger.warning("[fire] self %s exception: %s", ch, e)
         else:
+            # Target delivery stays manual (pending_channels, user taps Send),
+            # but the creator also receives a copy on their own channels right away.
             pending_for_others.append(ch)
+            t_name = target.get("name") or "them"
+            creator_msg = f"(For {t_name}) {msg}"
+            try:
+                if ch == "whatsapp" and user.get("phone_full"):
+                    results[f"{ch}_creator"] = await send_whatsapp(
+                        user["phone_full"],
+                        f"*⏰ {title}*\n{creator_msg}\n\n_Triggered: {when_str}_",
+                        template_vars={"1": title, "2": creator_msg, "3": when_str},
+                    )
+                elif ch == "sms" and user.get("phone_full"):
+                    results[f"{ch}_creator"] = await send_sms(
+                        user["phone_full"], f"⏰ {title}: {creator_msg} ({when_str})"
+                    )
+                elif ch == "email" and user.get("email"):
+                    results[f"{ch}_creator"] = await send_email(
+                        user["email"],
+                        f"⏰ {title}",
+                        _email_html(creator_msg, f"You created this reminder for {t_name}."),
+                    )
+                else:
+                    results[f"{ch}_creator"] = False
+                    logger.warning("[fire] creator copy %s skipped: missing contact for %s", ch, user.get("id"))
+            except Exception as e:
+                results[f"{ch}_creator"] = False
+                logger.warning("[fire] creator copy %s exception: %s", ch, e)
 
     now = datetime.now(timezone.utc).isoformat()
     new_triggered = r.get("triggered_count", 0) + 1

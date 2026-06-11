@@ -5,6 +5,7 @@ import {
   TextInput,
   StyleSheet,
   ScrollView,
+  Switch,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
@@ -20,6 +21,7 @@ import { colors, radius, spacing } from "../../src/theme";
 import { apiFetch } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { combineDateTime, fmtDate } from "../../src/utils";
+import { maybeAskForRating, recordReminderCreated } from "../../src/rating";
 
 type Channel = "push" | "whatsapp" | "email" | "sms";
 type Contact = { id: string; name: string; phone?: string; email?: string };
@@ -62,7 +64,8 @@ export default function CreateReminder() {
   const [time, setTime] = useState<Date>(now);
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
-  // Repeat is optional: empty count = fire once, "0" = unlimited
+  // Repeat is optional: toggle OFF = fire once, count "0" = unlimited
+  const [repeatEnabled, setRepeatEnabled] = useState(false);
   const [repeatCount, setRepeatCount] = useState("");
   const [repeatUnit, setRepeatUnit] = useState<RepeatUnit>("day");
   const [repeatValue, setRepeatValue] = useState("1");
@@ -104,6 +107,7 @@ export default function CreateReminder() {
         setMessage(r.message || "");
         setChannels((r.channels || ["push"]) as Channel[]);
         const rc = r.repeat_count ?? 1;
+        setRepeatEnabled(rc === -1 || rc > 1);
         setRepeatCount(rc === -1 ? "0" : rc > 1 ? String(rc) : "");
         const hours = r.repeat_interval_hours ?? 24;
         if (hours < 1) {
@@ -152,8 +156,9 @@ export default function CreateReminder() {
       if (finalDateTime.getTime() < Date.now() - 60000) {
         return "Scheduled time is in the past.";
       }
-      const rc = repeatCount.trim();
-      if (rc !== "") {
+      if (repeatEnabled) {
+        const rc = repeatCount.trim();
+        if (rc === "") return "Enter how many times to repeat (0 for unlimited).";
         const n = parseInt(rc);
         if (isNaN(n) || n < 0) return "Repeat count must be 0 or a positive number.";
         if (n > 50) return "Repeat count can't exceed 50.";
@@ -185,9 +190,9 @@ export default function CreateReminder() {
     if (err) return Alert.alert("Check inputs", err);
     setSaving(true);
     try {
-      // Empty repeat field = one-time reminder; "0" = unlimited (-1 for the API)
+      // Toggle off = one-time reminder; "0" = unlimited (-1 for the API)
       const rcStr = repeatCount.trim();
-      const rcNum = rcStr === "" ? 1 : parseInt(rcStr) === 0 ? -1 : parseInt(rcStr) || 1;
+      const rcNum = !repeatEnabled || rcStr === "" ? 1 : parseInt(rcStr) === 0 ? -1 : parseInt(rcStr) || 1;
       const body = {
         title: title.trim(),
         message: message.trim(),
@@ -219,6 +224,7 @@ export default function CreateReminder() {
           });
         } catch {}
       }
+      recordReminderCreated();
       setSavedSheet(true);
     } catch (e: any) {
       Alert.alert("Error", e.message);
@@ -293,35 +299,48 @@ export default function CreateReminder() {
 
               <View style={styles.repeatSection}>
                 <View style={styles.repeatHeader}>
-                  <Text style={styles.repeatTitle}>Repeat Reminders</Text>
-                  <Badge label="Optional" />
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                    <Text style={styles.repeatTitle}>Repeat Reminders</Text>
+                    <Badge label="Optional" />
+                  </View>
+                  <Switch
+                    value={repeatEnabled}
+                    onValueChange={setRepeatEnabled}
+                    trackColor={{ false: colors.border, true: colors.primary }}
+                    thumbColor="#fff"
+                    testID="repeat-toggle"
+                  />
                 </View>
 
-                <View style={styles.inlineRow}>
-                  <Text style={styles.inlineText}>Repeat</Text>
-                  <TextInput
-                    style={styles.inlineInput}
-                    keyboardType="numeric"
-                    placeholder="—"
-                    placeholderTextColor={colors.textMuted}
-                    value={repeatCount}
-                    onChangeText={setRepeatCount}
-                    testID="wizard-repeat-count"
-                  />
-                  <Text style={styles.inlineText}>times</Text>
-                </View>
-                <Text style={styles.repeatHint}>Type 0 for unlimited repeats until I stop.</Text>
+                <View pointerEvents={repeatEnabled ? "auto" : "none"} style={{ opacity: repeatEnabled ? 1 : 0.4 }}>
+                  <View style={styles.inlineRow}>
+                    <Text style={styles.inlineText}>Repeat</Text>
+                    <TextInput
+                      style={styles.inlineInput}
+                      keyboardType="numeric"
+                      placeholder="—"
+                      placeholderTextColor={colors.textMuted}
+                      value={repeatCount}
+                      onChangeText={setRepeatCount}
+                      editable={repeatEnabled}
+                      testID="wizard-repeat-count"
+                    />
+                    <Text style={styles.inlineText}>times</Text>
+                  </View>
+                  <Text style={styles.repeatHint}>Type 0 for unlimited repeats until I stop.</Text>
 
-                <View style={[styles.inlineRow, { marginTop: spacing.md, flexWrap: "wrap" }]}>
-                  <Text style={styles.inlineText}>Repeat reminders after every</Text>
-                  <TextInput
-                    style={styles.inlineInput}
-                    keyboardType="numeric"
-                    value={repeatValue}
-                    onChangeText={setRepeatValue}
-                    testID="wizard-repeat-value"
-                  />
-                  <UnitDropdown value={repeatUnit} onChange={setRepeatUnit} />
+                  <View style={[styles.inlineRow, { marginTop: spacing.md, flexWrap: "wrap" }]}>
+                    <Text style={styles.inlineText}>Repeat reminders after every</Text>
+                    <TextInput
+                      style={styles.inlineInput}
+                      keyboardType="numeric"
+                      value={repeatValue}
+                      onChangeText={setRepeatValue}
+                      editable={repeatEnabled}
+                      testID="wizard-repeat-value"
+                    />
+                    <UnitDropdown value={repeatUnit} onChange={setRepeatUnit} />
+                  </View>
                 </View>
               </View>
             </>
@@ -494,6 +513,8 @@ export default function CreateReminder() {
               onPress={() => {
                 setSavedSheet(false);
                 router.replace("/(app)/dashboard");
+                // Positive moment — ask for a store rating if a milestone was hit
+                maybeAskForRating();
               }}
               testID="success-dashboard"
             />
@@ -667,7 +688,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: spacing.md,
   },
-  repeatHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
+  repeatHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md },
   repeatTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
   inlineRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   inlineText: { color: colors.text, fontSize: 15, fontWeight: "500" },

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -13,7 +14,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Button, Card, Chip, Input, SectionTitle } from "../../src/ui";
+import { Badge, Button, Card, Chip, Input, SectionTitle } from "../../src/ui";
 import { PickerSheet } from "../../src/PickerSheet";
 import { colors, radius, spacing } from "../../src/theme";
 import { apiFetch } from "../../src/api";
@@ -22,8 +23,27 @@ import { combineDateTime, fmtDate } from "../../src/utils";
 
 type Channel = "push" | "whatsapp" | "email" | "sms";
 type Contact = { id: string; name: string; phone?: string; email?: string };
+type RepeatUnit = "min" | "hour" | "day" | "week" | "month" | "year";
 
 const STEPS = ["Event", "Timing", "Delivery", "Target"];
+
+const UNIT_HOURS: Record<RepeatUnit, number> = {
+  min: 1 / 60,
+  hour: 1,
+  day: 24,
+  week: 168,
+  month: 720,
+  year: 8760,
+};
+
+const UNIT_OPTIONS: { value: RepeatUnit; label: string }[] = [
+  { value: "min", label: "Minutes" },
+  { value: "hour", label: "Hours" },
+  { value: "day", label: "Days" },
+  { value: "week", label: "Weekly" },
+  { value: "month", label: "Monthly" },
+  { value: "year", label: "Yearly" },
+];
 
 export default function CreateReminder() {
   const router = useRouter();
@@ -42,10 +62,10 @@ export default function CreateReminder() {
   const [time, setTime] = useState<Date>(now);
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
-  const [repeatCount, setRepeatCount] = useState("1");
-  const [repeatUnit, setRepeatUnit] = useState<"min" | "hour" | "day" | "week" | "month">("hour");
-  const [repeatValue, setRepeatValue] = useState("24");
-  const [isUnlimited, setIsUnlimited] = useState(false);
+  // Repeat is optional: empty count = fire once, "0" = unlimited
+  const [repeatCount, setRepeatCount] = useState("");
+  const [repeatUnit, setRepeatUnit] = useState<RepeatUnit>("day");
+  const [repeatValue, setRepeatValue] = useState("1");
 
   // Step 3
   const [channels, setChannels] = useState<Channel[]>(["push"]);
@@ -83,17 +103,22 @@ export default function CreateReminder() {
         setTitle(r.title || "");
         setMessage(r.message || "");
         setChannels((r.channels || ["push"]) as Channel[]);
-        setRepeatCount(String(r.repeat_count ?? 1));
-        if (r.repeat_count === -1) setIsUnlimited(true);
+        const rc = r.repeat_count ?? 1;
+        setRepeatCount(rc === -1 ? "0" : rc > 1 ? String(rc) : "");
         const hours = r.repeat_interval_hours ?? 24;
-        if (hours === 168) {
-          setRepeatUnit("week");
-        } else if (hours === 720) {
-          setRepeatUnit("month");
-        } else if (hours < 1) {
+        if (hours < 1) {
           setRepeatUnit("min");
           setRepeatValue(String(Math.round(hours * 60)));
-        } else if (hours % 24 === 0 && hours >= 24) {
+        } else if (hours % 8760 === 0) {
+          setRepeatUnit("year");
+          setRepeatValue(String(hours / 8760));
+        } else if (hours % 720 === 0) {
+          setRepeatUnit("month");
+          setRepeatValue(String(hours / 720));
+        } else if (hours % 168 === 0) {
+          setRepeatUnit("week");
+          setRepeatValue(String(hours / 168));
+        } else if (hours % 24 === 0) {
           setRepeatUnit("day");
           setRepeatValue(String(hours / 24));
         } else {
@@ -116,14 +141,7 @@ export default function CreateReminder() {
     setChannels((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
   };
 
-  const computeRepeatHours = () => {
-    if (repeatUnit === "week") return 168;
-    if (repeatUnit === "month") return 720;
-    const v = parseFloat(repeatValue) || 0;
-    if (repeatUnit === "min") return v / 60;
-    if (repeatUnit === "hour") return v;
-    return v * 24;
-  };
+  const computeRepeatHours = () => (parseFloat(repeatValue) || 0) * UNIT_HOURS[repeatUnit];
 
   const finalDateTime = combineDateTime(date, time);
 
@@ -134,13 +152,14 @@ export default function CreateReminder() {
       if (finalDateTime.getTime() < Date.now() - 60000) {
         return "Scheduled time is in the past.";
       }
-      if (!isUnlimited) {
-        const rc = parseInt(repeatCount);
-        if (!(rc >= 1)) return "Repeat count must be at least 1.";
-        if (rc > 50) return "Repeat count can't exceed 50.";
+      const rc = repeatCount.trim();
+      if (rc !== "") {
+        const n = parseInt(rc);
+        if (isNaN(n) || n < 0) return "Repeat count must be 0 or a positive number.";
+        if (n > 50) return "Repeat count can't exceed 50.";
+        if (!(computeRepeatHours() > 0)) return "Repeat interval must be greater than 0.";
+        if (computeRepeatHours() < 0.0167) return "Repeat interval must be at least 1 minute.";
       }
-      if (!(computeRepeatHours() > 0)) return "Repeat interval must be greater than 0.";
-      if (computeRepeatHours() < 0.0167) return "Repeat interval must be at least 1 minute.";
     } else if (step === 2) {
       if (channels.length === 0) return "Select at least one delivery method.";
     } else if (step === 3) {
@@ -166,13 +185,16 @@ export default function CreateReminder() {
     if (err) return Alert.alert("Check inputs", err);
     setSaving(true);
     try {
+      // Empty repeat field = one-time reminder; "0" = unlimited (-1 for the API)
+      const rcStr = repeatCount.trim();
+      const rcNum = rcStr === "" ? 1 : parseInt(rcStr) === 0 ? -1 : parseInt(rcStr) || 1;
       const body = {
         title: title.trim(),
         message: message.trim(),
         scheduled_at: finalDateTime.toISOString(),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         channels,
-        repeat_count: isUnlimited ? -1 : (parseInt(repeatCount) || 1),
+        repeat_count: rcNum,
         repeat_interval_hours: computeRepeatHours(),
         lead_minutes: 0,
         target: {
@@ -242,6 +264,7 @@ export default function CreateReminder() {
                 style={{ height: 110, textAlignVertical: "top", paddingTop: 14 }}
                 testID="wizard-message"
               />
+              <Button label="Continue" onPress={next} testID="wizard-next" />
             </>
           )}
 
@@ -261,69 +284,46 @@ export default function CreateReminder() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={[styles.label, { marginTop: spacing.lg }]}>Repeat</Text>
-              {!isUnlimited && (
-                <View style={{ flexDirection: "row" }}>
-                  <Input
-                    label="Count"
-                    placeholder="1"
-                    keyboardType="numeric"
-                    value={repeatCount}
-                    onChangeText={setRepeatCount}
-                    style={{ flex: 1 }}
-                    testID="wizard-repeat-count"
-                  />
-                  {repeatUnit !== "week" && repeatUnit !== "month" && (
-                    <>
-                      <View style={{ width: 12 }} />
-                      <Input
-                        label={`Every (${repeatUnit === "min" ? "minutes" : repeatUnit === "hour" ? "hours" : "days"})`}
-                        placeholder="24"
-                        keyboardType="numeric"
-                        value={repeatValue}
-                        onChangeText={setRepeatValue}
-                        style={{ flex: 1 }}
-                        testID="wizard-repeat-value"
-                      />
-                    </>
-                  )}
-                </View>
-              )}
-              <View style={{ flexDirection: "row", marginTop: 4, flexWrap: "wrap" }}>
-                {(["min", "hour", "day", "week", "month"] as const).map((u) => (
-                  <Chip
-                    key={u}
-                    label={u === "min" ? "Minutes" : u === "hour" ? "Hours" : u === "day" ? "Days" : u === "week" ? "Weekly" : "Monthly"}
-                    selected={repeatUnit === u}
-                    onPress={() => {
-                      setRepeatUnit(u);
-                      // sensible defaults when switching unit
-                      if (u === "week") setRepeatValue("168");
-                      if (u === "month") setRepeatValue("720");
-                      if (u === "min" && (parseFloat(repeatValue) || 0) > 60) setRepeatValue("30");
-                      if (u === "hour") setRepeatValue((prev) => (parseFloat(prev) || 0) > 48 ? "24" : prev);
-                    }}
-                    testID={`repeat-unit-${u}`}
-                  />
-                ))}
-              </View>
-
-              <TouchableOpacity
-                style={[styles.checkRow, { marginTop: spacing.md }]}
-                onPress={() => setIsUnlimited(!isUnlimited)}
-                testID="unlimited-toggle"
-              >
-                <View style={[styles.checkbox, isUnlimited && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                  {isUnlimited && <Ionicons name="infinite" size={14} color="#fff" />}
-                </View>
-                <Text style={{ color: colors.text, fontWeight: "600" }}>Repeat forever (until I stop it)</Text>
-              </TouchableOpacity>
               <Card style={{ flexDirection: "row", alignItems: "center", backgroundColor: colors.primaryTint, borderColor: "transparent", marginTop: spacing.md }}>
                 <Ionicons name="flash" size={18} color={colors.primary} />
                 <Text style={{ marginLeft: 8, color: colors.text, flex: 1 }}>
                   First fire at {fmtDate(finalDateTime.toISOString())}
                 </Text>
               </Card>
+
+              <View style={styles.repeatSection}>
+                <View style={styles.repeatHeader}>
+                  <Text style={styles.repeatTitle}>Repeat Reminders</Text>
+                  <Badge label="Optional" />
+                </View>
+
+                <View style={styles.inlineRow}>
+                  <Text style={styles.inlineText}>Repeat</Text>
+                  <TextInput
+                    style={styles.inlineInput}
+                    keyboardType="numeric"
+                    placeholder="—"
+                    placeholderTextColor={colors.textMuted}
+                    value={repeatCount}
+                    onChangeText={setRepeatCount}
+                    testID="wizard-repeat-count"
+                  />
+                  <Text style={styles.inlineText}>times</Text>
+                </View>
+                <Text style={styles.repeatHint}>Type 0 for unlimited repeats until I stop.</Text>
+
+                <View style={[styles.inlineRow, { marginTop: spacing.md, flexWrap: "wrap" }]}>
+                  <Text style={styles.inlineText}>Repeat reminders after every</Text>
+                  <TextInput
+                    style={styles.inlineInput}
+                    keyboardType="numeric"
+                    value={repeatValue}
+                    onChangeText={setRepeatValue}
+                    testID="wizard-repeat-value"
+                  />
+                  <UnitDropdown value={repeatUnit} onChange={setRepeatUnit} />
+                </View>
+              </View>
             </>
           )}
 
@@ -463,14 +463,16 @@ export default function CreateReminder() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Bottom action */}
-      <View style={[styles.footer, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
-        {step < 3 ? (
-          <Button label="Continue" onPress={next} testID="wizard-next" />
-        ) : (
-          <Button label="Create reminder" icon="checkmark-circle" onPress={submit} loading={saving} testID="wizard-submit" />
-        )}
-      </View>
+      {/* Bottom action (step 0 renders Continue inline below the description) */}
+      {step > 0 && (
+        <View style={[styles.footer, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
+          {step < 3 ? (
+            <Button label="Continue" onPress={next} testID="wizard-next" />
+          ) : (
+            <Button label="Create reminder" icon="checkmark-circle" onPress={submit} loading={saving} testID="wizard-submit" />
+          )}
+        </View>
+      )}
 
       {/* Pickers */}
       <PickerSheet visible={showDate} initial={date} mode="date" onClose={() => setShowDate(false)} onConfirm={(d) => setDate(d)} />
@@ -553,6 +555,75 @@ function ChannelTile({
   );
 }
 
+function UnitDropdown({ value, onChange }: { value: RepeatUnit; onChange: (u: RepeatUnit) => void }) {
+  const [open, setOpen] = useState(false);
+  const current = UNIT_OPTIONS.find((o) => o.value === value)!;
+  return (
+    <>
+      <TouchableOpacity style={ddStyles.trigger} activeOpacity={0.85} onPress={() => setOpen(true)} testID="wizard-repeat-unit">
+        <Text style={ddStyles.triggerText}>{current.label}</Text>
+        <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
+      </TouchableOpacity>
+      <Modal transparent animationType="fade" visible={open} onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={ddStyles.overlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={ddStyles.menu}>
+            {UNIT_OPTIONS.map((o) => {
+              const selected = o.value === value;
+              return (
+                <TouchableOpacity
+                  key={o.value}
+                  style={[ddStyles.item, selected && { backgroundColor: colors.primaryTint }]}
+                  onPress={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                  }}
+                  testID={`repeat-unit-${o.value}`}
+                >
+                  <Text style={{ color: selected ? colors.primary : colors.text, fontSize: 15, fontWeight: selected ? "700" : "500" }}>
+                    {o.label}
+                  </Text>
+                  {selected && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+}
+
+const ddStyles = StyleSheet.create({
+  trigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 44,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+  },
+  triggerText: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  overlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: "center", padding: spacing.lg },
+  menu: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingVertical: 6,
+    width: "100%",
+    maxWidth: 380,
+    alignSelf: "center",
+  },
+  item: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 13,
+  },
+});
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   topRow: {
@@ -588,6 +659,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     marginRight: 8,
   },
+  repeatSection: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  repeatHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
+  repeatTitle: { fontSize: 15, fontWeight: "700", color: colors.text },
+  inlineRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  inlineText: { color: colors.text, fontSize: 15, fontWeight: "500" },
+  inlineInput: {
+    minWidth: 64,
+    height: 44,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    color: colors.text,
+    textAlign: "center",
+  },
+  repeatHint: { fontSize: 12, color: colors.textMuted, marginTop: 6 },
   checkRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
   checkbox: {
     width: 22,

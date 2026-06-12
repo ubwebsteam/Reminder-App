@@ -18,6 +18,7 @@ import { Badge, Card, SectionTitle } from "../../src/ui";
 import { fmtDate, fmtRelative } from "../../src/utils";
 import { registerForPush } from "../../src/push";
 import { initRatingTracker, maybeAskForRating } from "../../src/rating";
+import { maybePromptForUpdate } from "../../src/appUpdate";
 import { getTabBarHeight } from "../../src/safeBottom";
 
 type Reminder = {
@@ -70,9 +71,14 @@ export default function Dashboard() {
   useEffect(() => {
     registerForPush();
     initRatingTracker();
-    // Ask for a store rating once settled in, not right on launch
-    const t = setTimeout(() => maybeAskForRating(), 4000);
-    return () => clearTimeout(t);
+    // Soft update check first, then the store-rating ask — staggered so the
+    // two prompts never appear at the same moment
+    const updateT = setTimeout(() => maybePromptForUpdate(), 1500);
+    const ratingT = setTimeout(() => maybeAskForRating(), 6000);
+    return () => {
+      clearTimeout(updateT);
+      clearTimeout(ratingT);
+    };
   }, []);
 
   const greeting = () => {

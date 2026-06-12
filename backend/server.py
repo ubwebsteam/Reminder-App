@@ -151,7 +151,7 @@ class ReminderCreate(BaseModel):
     timezone: str = "UTC"
     channels: List[Channel]
     repeat_count: int = Field(default=1, ge=-1, le=9999)
-    repeat_interval_hours: float = Field(default=24, ge=0.0167)  # min 1 minute
+    repeat_interval_hours: float = Field(default=24, ge=0.0167, le=43800)  # 1 minute .. 5 years
     lead_minutes: int = Field(default=0, ge=0)  # reminder N minutes before
     target: ReminderTarget
     contact_id: Optional[str] = None
@@ -162,9 +162,9 @@ class ReminderUpdate(BaseModel):
     message: Optional[str] = None
     scheduled_at: Optional[str] = None
     channels: Optional[List[Channel]] = None
-    repeat_count: Optional[int] = None
-    repeat_interval_hours: Optional[float] = None
-    lead_minutes: Optional[int] = None
+    repeat_count: Optional[int] = Field(default=None, ge=-1, le=9999)
+    repeat_interval_hours: Optional[float] = Field(default=None, ge=0.0167, le=43800)
+    lead_minutes: Optional[int] = Field(default=None, ge=0)
 
 
 class ReminderOut(BaseModel):
@@ -398,8 +398,13 @@ def _compute_next_fire(r: dict) -> Optional[datetime]:
     repeat_count = r.get("repeat_count", 1)
     if repeat_count != -1 and triggered >= repeat_count:
         return None
-    interval = timedelta(hours=float(r.get("repeat_interval_hours", 24)))
-    return first + interval * triggered
+    try:
+        interval = timedelta(hours=float(r.get("repeat_interval_hours", 24)))
+        return first + interval * triggered
+    except (OverflowError, ValueError) as e:
+        # Interval too large to represent (legacy bad data) — stop scheduling instead of crashing
+        logger.warning("[schedule] invalid interval for reminder %s: %s", r.get("id"), e)
+        return None
 
 
 def _job_id(reminder_id: str) -> str:

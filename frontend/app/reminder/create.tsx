@@ -15,7 +15,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Badge, Button, Card, Chip, Input, SectionTitle } from "../../src/ui";
+import { Button, Card, Chip, Input, SectionTitle } from "../../src/ui";
 import { PickerSheet } from "../../src/PickerSheet";
 import { colors, radius, spacing } from "../../src/theme";
 import { apiFetch } from "../../src/api";
@@ -46,6 +46,20 @@ const UNIT_OPTIONS: { value: RepeatUnit; label: string }[] = [
   { value: "month", label: "Monthly" },
   { value: "year", label: "Yearly" },
 ];
+
+// Per-unit interval limits (all equal ≤ 5 years; backend caps at 43800 hours)
+const UNIT_MAX: Record<RepeatUnit, { max: number; label: string }> = {
+  min: { max: 10080, label: "minutes (1 week)" },
+  hour: { max: 8760, label: "hours (1 year)" },
+  day: { max: 365, label: "days (1 year)" },
+  week: { max: 52, label: "weeks (1 year)" },
+  month: { max: 24, label: "months (2 years)" },
+  year: { max: 5, label: "years" },
+};
+
+const MAX_REPEAT_COUNT = 50;
+
+const digitsOnly = (t: string) => t.replace(/[^0-9]/g, "");
 
 export default function CreateReminder() {
   const router = useRouter();
@@ -161,9 +175,13 @@ export default function CreateReminder() {
         if (rc === "") return "Enter how many times to repeat (0 for unlimited).";
         const n = parseInt(rc);
         if (isNaN(n) || n < 0) return "Repeat count must be 0 or a positive number.";
-        if (n > 50) return "Repeat count can't exceed 50.";
-        if (!(computeRepeatHours() > 0)) return "Repeat interval must be greater than 0.";
-        if (computeRepeatHours() < 0.0167) return "Repeat interval must be at least 1 minute.";
+        if (n > MAX_REPEAT_COUNT) return `Repeat count can't exceed ${MAX_REPEAT_COUNT}.`;
+        const iv = repeatValue.trim();
+        if (iv === "") return "Enter the repeat interval.";
+        const v = parseInt(iv);
+        if (isNaN(v) || v < 1) return "Repeat interval must be at least 1.";
+        const { max, label } = UNIT_MAX[repeatUnit];
+        if (v > max) return `Repeat interval can't exceed ${max} ${label}.`;
       }
     } else if (step === 2) {
       if (channels.length === 0) return "Select at least one delivery method.";
@@ -299,10 +317,7 @@ export default function CreateReminder() {
 
               <View style={styles.repeatSection}>
                 <View style={styles.repeatHeader}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
-                    <Text style={styles.repeatTitle}>Repeat Reminders</Text>
-                    <Badge label="Optional" />
-                  </View>
+                  <Text style={styles.repeatTitle}>Repeat Reminders</Text>
                   <Switch
                     value={repeatEnabled}
                     onValueChange={setRepeatEnabled}
@@ -321,7 +336,8 @@ export default function CreateReminder() {
                       placeholder="—"
                       placeholderTextColor={colors.textMuted}
                       value={repeatCount}
-                      onChangeText={setRepeatCount}
+                      onChangeText={(t) => setRepeatCount(digitsOnly(t))}
+                      maxLength={2}
                       editable={repeatEnabled}
                       testID="wizard-repeat-count"
                     />
@@ -335,7 +351,8 @@ export default function CreateReminder() {
                       style={styles.inlineInput}
                       keyboardType="numeric"
                       value={repeatValue}
-                      onChangeText={setRepeatValue}
+                      onChangeText={(t) => setRepeatValue(digitsOnly(t))}
+                      maxLength={5}
                       editable={repeatEnabled}
                       testID="wizard-repeat-value"
                     />

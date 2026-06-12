@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIn
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as Application from "expo-application";
 import { useAuth } from "../../src/auth";
 import { apiFetch } from "../../src/api";
 import { Button, Card, SectionTitle } from "../../src/ui";
@@ -140,7 +141,7 @@ export default function Profile() {
           </Card>
         </View>
 
-        <Text style={styles.footer}>Rymind · v1.0.0</Text>
+        <Text style={styles.footer}>Rymind · v{Application.nativeApplicationVersion || "1.0.2"}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -181,12 +182,16 @@ const styles = StyleSheet.create({
   footer: { color: colors.textMuted, fontSize: 12, textAlign: "center", marginTop: spacing.xxl },
   dangerCard: {
     borderWidth: 1,
-    borderColor: "rgba(220, 53, 69, 0.25)",
-    backgroundColor: "rgba(220, 53, 69, 0.04)",
+    borderColor: "#EDD2D2",
+    backgroundColor: "#FBF4F3",
+    // Opaque tints + no elevation: Android renders its shadow through
+    // translucent card backgrounds, which looked like a dark thick border
+    elevation: 0,
+    shadowOpacity: 0,
   },
   dangerIcon: {
     width: 34, height: 34, borderRadius: 10,
-    backgroundColor: "rgba(220, 53, 69, 0.1)",
+    backgroundColor: "#F3DEDE",
     alignItems: "center", justifyContent: "center", marginRight: 12,
   },
   dangerTitle: {

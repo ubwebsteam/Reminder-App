@@ -218,7 +218,8 @@ export default function CreateReminder() {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         channels,
         repeat_count: rcNum,
-        repeat_interval_hours: computeRepeatHours(),
+        // Toggle off → ignore whatever is in the interval box (it isn't validated then)
+        repeat_interval_hours: repeatEnabled ? computeRepeatHours() : 24,
         lead_minutes: 0,
         target: {
           is_self: isSelf,

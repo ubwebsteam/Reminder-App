@@ -116,12 +116,12 @@ export default function Contacts() {
               <Text style={styles.sheetTitle}>New contact</Text>
               <Input label="Name" placeholder="Jane Doe" value={name} onChangeText={setName} testID="contact-name" />
               <Input
-                label="Phone"
+                label="Phone (WhatsApp/SMS)"
                 placeholder="+91 9876543210"
                 keyboardType="phone-pad"
                 value={phone}
                 onChangeText={setPhone}
-                hint="Used to send reminders via WhatsApp or SMS."
+                hint="One number, used for both WhatsApp and SMS reminders."
                 testID="contact-phone"
               />
               <Input

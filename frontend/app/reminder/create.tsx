@@ -161,6 +161,16 @@ export default function CreateReminder() {
 
   const computeRepeatHours = () => (parseFloat(repeatValue) || 0) * UNIT_HOURS[repeatUnit];
 
+  // One phone number serves both WhatsApp and SMS — label reflects what's selected
+  const phoneFieldLabel = (() => {
+    const wa = channels.includes("whatsapp");
+    const sms = channels.includes("sms");
+    if (wa && sms) return "Phone number (WhatsApp/SMS)";
+    if (wa) return "Phone number (WhatsApp)";
+    if (sms) return "Phone number (SMS)";
+    return "Phone number";
+  })();
+
   const finalDateTime = combineDateTime(date, time);
 
   const validate = (): string | null => {
@@ -459,13 +469,18 @@ export default function CreateReminder() {
                   )}
 
                   <Input label="Name" placeholder="Recipient name" value={targetName} onChangeText={setTargetName} testID="target-name" />
-                  {(channels.includes("whatsapp") || channels.includes("sms")) && (
+                  {(channels.includes("push") || channels.includes("whatsapp") || channels.includes("sms")) && (
                     <Input
-                      label="Phone number"
+                      label={phoneFieldLabel}
                       placeholder="+91 9876543210"
                       keyboardType="phone-pad"
                       value={targetPhone}
                       onChangeText={setTargetPhone}
+                      hint={
+                        channels.includes("whatsapp") || channels.includes("sms")
+                          ? undefined
+                          : "Used to find their Rymind app and deliver the notification. If they're not on Rymind, the reminder comes to you to forward."
+                      }
                       testID="target-phone"
                     />
                   )}

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   FlatList,
   Modal,
+  TextInput,
   TouchableOpacity,
   Platform,
   KeyboardAvoidingView,
@@ -14,17 +15,23 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { apiFetch } from "../../src/api";
+import { useAuth } from "../../src/auth";
 import { colors, radius, shadow, spacing } from "../../src/theme";
 import { Button, Card, Input } from "../../src/ui";
+import { COUNTRIES, isValidPhoneNumber, phoneDigits, splitPhone } from "../../src/countries";
 
 type Contact = { id: string; name: string; phone?: string; email?: string };
 
 export default function Contacts() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const defaultCc = user?.country_code || "+91";
   const tabBarSpace = 60 + Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 6) + 8;
   const [items, setItems] = useState<Contact[]>([]);
   const [modal, setModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [cc, setCc] = useState(defaultCc);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
@@ -38,16 +45,44 @@ export default function Contacts() {
   };
   useFocusEffect(useCallback(() => { load(); }, []));
 
+  const openCreate = () => {
+    setEditingId(null);
+    setName("");
+    setCc(defaultCc);
+    setPhone("");
+    setEmail("");
+    setModal(true);
+  };
+
+  const openEdit = (c: Contact) => {
+    const { cc: parsedCc, number } = splitPhone(c.phone, defaultCc);
+    setEditingId(c.id);
+    setName(c.name);
+    setCc(parsedCc);
+    setPhone(number);
+    setEmail(c.email || "");
+    setModal(true);
+  };
+
   const save = async () => {
-    if (!name.trim()) return Alert.alert("Name is required");
+    if (!name.trim()) return Alert.alert("Name required", "Please enter the contact's name.");
+    if (!phone.trim()) return Alert.alert("Phone required", "A contact must have a phone number.");
+    if (!isValidPhoneNumber(phone)) {
+      return Alert.alert("Invalid phone number", "Please enter a valid phone number.");
+    }
     setSaving(true);
     try {
-      await apiFetch("/contacts", {
-        method: "POST",
-        body: JSON.stringify({ name: name.trim(), phone: phone.trim() || null, email: email.trim() || null }),
+      const body = JSON.stringify({
+        name: name.trim(),
+        phone: `${cc}${phoneDigits(phone)}`,
+        email: email.trim() || null,
       });
+      if (editingId) {
+        await apiFetch(`/contacts/${editingId}`, { method: "PUT", body });
+      } else {
+        await apiFetch("/contacts", { method: "POST", body });
+      }
       setModal(false);
-      setName(""); setPhone(""); setEmail("");
       await load();
     } catch (e: any) {
       Alert.alert("Error", e.message);
@@ -72,11 +107,7 @@ export default function Contacts() {
           <Text style={styles.title}>People</Text>
           <Text style={styles.sub}>Saved contacts for quick reminders.</Text>
         </View>
-        <TouchableOpacity
-          onPress={() => setModal(true)}
-          style={styles.addBtn}
-          testID="add-contact-btn"
-        >
+        <TouchableOpacity onPress={openCreate} style={styles.addBtn} testID="add-contact-btn">
           <Ionicons name="add" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -101,6 +132,9 @@ export default function Contacts() {
               {item.phone ? <Text style={styles.meta}>{item.phone}</Text> : null}
               {item.email ? <Text style={styles.meta}>{item.email}</Text> : null}
             </View>
+            <TouchableOpacity onPress={() => openEdit(item)} hitSlop={12} style={{ marginRight: 16 }} testID={`edit-contact-${item.id}`}>
+              <Ionicons name="create-outline" size={20} color={colors.primary} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => remove(item.id)} hitSlop={12} testID={`delete-contact-${item.id}`}>
               <Ionicons name="trash-outline" size={20} color={colors.danger} />
             </TouchableOpacity>
@@ -113,19 +147,27 @@ export default function Contacts() {
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
             <View style={[styles.sheet, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
               <View style={styles.handle} />
-              <Text style={styles.sheetTitle}>New contact</Text>
+              <Text style={styles.sheetTitle}>{editingId ? "Edit contact" : "New contact"}</Text>
               <Input label="Name" placeholder="Jane Doe" value={name} onChangeText={setName} testID="contact-name" />
+
+              <Text style={styles.fieldLabel}>Phone (WhatsApp/SMS)</Text>
+              <View style={styles.phoneRow}>
+                <CountryCodeDropdown value={cc} onChange={setCc} />
+                <TextInput
+                  style={styles.phoneInput}
+                  placeholder="9876543210"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="phone-pad"
+                  value={phone}
+                  onChangeText={(t) => setPhone(phoneDigits(t))}
+                  maxLength={15}
+                  testID="contact-phone"
+                />
+              </View>
+              <Text style={styles.hint}>One number, used for both WhatsApp and SMS reminders.</Text>
+
               <Input
-                label="Phone (WhatsApp/SMS)"
-                placeholder="+91 9876543210"
-                keyboardType="phone-pad"
-                value={phone}
-                onChangeText={setPhone}
-                hint="One number, used for both WhatsApp and SMS reminders."
-                testID="contact-phone"
-              />
-              <Input
-                label="Email"
+                label="Email (optional)"
                 placeholder="jane@example.com"
                 autoCapitalize="none"
                 keyboardType="email-address"
@@ -134,7 +176,7 @@ export default function Contacts() {
                 hint="Used to send reminders via email."
                 testID="contact-email"
               />
-              <Button label="Save contact" onPress={save} loading={saving} testID="contact-save" />
+              <Button label={editingId ? "Save changes" : "Save contact"} onPress={save} loading={saving} testID="contact-save" />
               <TouchableOpacity onPress={() => setModal(false)} style={{ alignItems: "center", marginTop: 10 }}>
                 <Text style={{ color: colors.textMuted }}>Cancel</Text>
               </TouchableOpacity>
@@ -143,6 +185,43 @@ export default function Contacts() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+function CountryCodeDropdown({ value, onChange }: { value: string; onChange: (cc: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <TouchableOpacity style={styles.ccTrigger} activeOpacity={0.85} onPress={() => setOpen(true)} testID="contact-cc">
+        <Text style={styles.ccTriggerText}>{value}</Text>
+        <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
+      </TouchableOpacity>
+      <Modal transparent animationType="fade" visible={open} onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={styles.ccOverlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={styles.ccMenu}>
+            {COUNTRIES.map((c) => {
+              const selected = c.code === value;
+              return (
+                <TouchableOpacity
+                  key={c.code}
+                  style={[styles.ccItem, selected && { backgroundColor: colors.primaryTint }]}
+                  onPress={() => {
+                    onChange(c.code);
+                    setOpen(false);
+                  }}
+                  testID={`contact-cc-${c.code}`}
+                >
+                  <Text style={{ color: selected ? colors.primary : colors.text, fontSize: 15, fontWeight: selected ? "700" : "500" }}>
+                    {c.label}
+                  </Text>
+                  {selected && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
   );
 }
 
@@ -177,4 +256,46 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border, borderRadius: 3, marginBottom: spacing.md,
   },
   sheetTitle: { fontSize: 20, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
+  fieldLabel: { fontSize: 13, fontWeight: "600", color: colors.text, marginBottom: 6, letterSpacing: 0.2 },
+  phoneRow: { flexDirection: "row", gap: 8 },
+  phoneInput: {
+    flex: 1,
+    height: 52,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 16,
+    backgroundColor: colors.surface,
+    fontSize: 16,
+    color: colors.text,
+  },
+  hint: { fontSize: 11, color: colors.textMuted, marginTop: 6, marginBottom: spacing.md, lineHeight: 15 },
+  ccTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 52,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+  },
+  ccTriggerText: { color: colors.text, fontSize: 16, fontWeight: "600" },
+  ccOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: "center", padding: spacing.lg },
+  ccMenu: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingVertical: 6,
+    width: "100%",
+    maxWidth: 360,
+    alignSelf: "center",
+  },
+  ccItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 13,
+  },
 });

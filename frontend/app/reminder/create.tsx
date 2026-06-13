@@ -22,6 +22,7 @@ import { apiFetch } from "../../src/api";
 import { useAuth } from "../../src/auth";
 import { combineDateTime, fmtDate } from "../../src/utils";
 import { maybeAskForRating, recordReminderCreated } from "../../src/rating";
+import { isValidPhoneNumber } from "../../src/countries";
 
 type Channel = "push" | "whatsapp" | "email" | "sms";
 type Contact = { id: string; name: string; phone?: string; email?: string };
@@ -171,6 +172,10 @@ export default function CreateReminder() {
     return "Phone number";
   })();
 
+  // Push/WhatsApp/SMS all need the recipient's number; email-only does not.
+  const recipientNeedsPhone =
+    channels.includes("push") || channels.includes("whatsapp") || channels.includes("sms");
+
   const finalDateTime = combineDateTime(date, time);
 
   const validate = (): string | null => {
@@ -198,8 +203,11 @@ export default function CreateReminder() {
     } else if (step === 3) {
       if (!isSelf) {
         if (!targetName.trim()) return "Enter contact name.";
-        if (channels.includes("whatsapp") && !targetPhone.trim()) return "WhatsApp number required.";
-        if (channels.includes("sms") && !targetPhone.trim()) return "SMS phone required.";
+        // Required whenever a phone-based channel (incl. App Notification) is selected
+        if (recipientNeedsPhone) {
+          if (!targetPhone.trim()) return "Phone number is required.";
+          if (!isValidPhoneNumber(targetPhone)) return "Enter a valid phone number.";
+        }
         if (channels.includes("email") && !targetEmail.trim()) return "Email required.";
       }
     }
@@ -247,7 +255,7 @@ export default function CreateReminder() {
             method: "POST",
             body: JSON.stringify({
               name: targetName.trim(),
-              phone: targetPhone.trim() || null,
+              phone: targetPhone.trim(),
               email: targetEmail.trim() || null,
             }),
           });
@@ -469,7 +477,7 @@ export default function CreateReminder() {
                   )}
 
                   <Input label="Name" placeholder="Recipient name" value={targetName} onChangeText={setTargetName} testID="target-name" />
-                  {(channels.includes("push") || channels.includes("whatsapp") || channels.includes("sms")) && (
+                  {recipientNeedsPhone && (
                     <Input
                       label={phoneFieldLabel}
                       placeholder="+91 9876543210"
@@ -479,7 +487,7 @@ export default function CreateReminder() {
                       hint={
                         channels.includes("whatsapp") || channels.includes("sms")
                           ? undefined
-                          : "Used to find their Rymind app and deliver the notification. If they're not on Rymind, the reminder comes to you to forward."
+                          : "Used to find their app and deliver the notification. If they're not on the app, the reminder comes to you to forward."
                       }
                       testID="target-phone"
                     />

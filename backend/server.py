@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -197,10 +197,39 @@ class StatusUpdate(BaseModel):
     postpone_minutes: Optional[int] = 30
 
 
+def _validate_contact_phone(value: Optional[str]) -> str:
+    """A contact must carry a usable phone number (7–15 digits, optional + prefix)."""
+    if value is None or not str(value).strip():
+        raise ValueError("Phone number is required")
+    cleaned = str(value).strip()
+    digits = "".join(c for c in cleaned if c.isdigit())
+    if len(digits) < 7:
+        raise ValueError("Enter a valid phone number")
+    if len(digits) > 15:
+        raise ValueError("Phone number is too long")
+    return cleaned
+
+
 class ContactCreate(BaseModel):
     name: str = Field(..., min_length=1)
-    phone: Optional[str] = None
+    phone: str = Field(..., min_length=1)
     email: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def _check_phone(cls, v: str) -> str:
+        return _validate_contact_phone(v)
+
+
+class ContactUpdate(BaseModel):
+    name: str = Field(..., min_length=1)
+    phone: str = Field(..., min_length=1)
+    email: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def _check_phone(cls, v: str) -> str:
+        return _validate_contact_phone(v)
 
 
 class ContactOut(BaseModel):
@@ -1155,6 +1184,25 @@ async def create_contact(payload: ContactCreate, current=Depends(get_current_use
         await broadcast_to_user(current["id"], {"type": "contact.created", "data": out.model_dump()})
     except Exception as e:
         logger.debug("[ws] broadcast contact.created failed: %s", e)
+    return out
+
+
+@api.put("/contacts/{cid}", response_model=ContactOut)
+async def update_contact(cid: str, payload: ContactUpdate, current=Depends(get_current_user)):
+    existing = await db.contacts.find_one({"id": cid, "user_id": current["id"]}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Contact not found")
+    updates = {
+        "name": payload.name.strip(),
+        "phone": payload.phone.strip(),
+        "email": (payload.email or "").strip() or None,
+    }
+    await db.contacts.update_one({"id": cid, "user_id": current["id"]}, {"$set": updates})
+    out = ContactOut(**{**existing, **updates})
+    try:
+        await broadcast_to_user(current["id"], {"type": "contact.updated", "data": out.model_dump()})
+    except Exception as e:
+        logger.debug("[ws] broadcast contact.updated failed: %s", e)
     return out
 
 

@@ -270,10 +270,9 @@ export default function CreateReminder() {
         scheduled_at: finalDateTime.toISOString(),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         channels,
-        // Repeat applies to self reminders only; someone-else reminders are one-time
-        repeat_count: isSelf ? rcNum : 1,
-        // Toggle off (or non-self) → ignore whatever is in the interval box
-        repeat_interval_hours: isSelf && repeatEnabled ? computeRepeatHours() : 24,
+        repeat_count: rcNum,
+        // Toggle off → ignore whatever is in the interval box (it isn't validated then)
+        repeat_interval_hours: repeatEnabled ? computeRepeatHours() : 24,
         lead_minutes: 0,
         target: {
           is_self: isSelf,
@@ -477,15 +476,6 @@ export default function CreateReminder() {
                   <Ionicons name="information-circle" size={24} color={colors.primary} />
                   <Text style={{ marginLeft: 10, color: colors.text, flex: 1, fontSize: 13, lineHeight: 20 }}>
                     The reminder will be sent directly to you through the delivery method you selected (such as notifications, email, etc.).
-                  </Text>
-                </Card>
-              )}
-
-              {!isSelf && repeatEnabled && (
-                <Card style={{ backgroundColor: colors.primaryTint, borderColor: "transparent", flexDirection: "row", alignItems: "center", marginBottom: spacing.md }}>
-                  <Ionicons name="information-circle" size={20} color={colors.primary} />
-                  <Text style={{ marginLeft: 8, color: colors.text, flex: 1, fontSize: 13, lineHeight: 19 }}>
-                    Repeat is available for reminders to yourself. This reminder will be sent once.
                   </Text>
                 </Card>
               )}

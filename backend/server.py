@@ -673,12 +673,13 @@ async def _fire_reminder(reminder_id: str) -> None:
 
     await db.reminders.update_one({"id": reminder_id}, {"$set": update})
 
-    # Reschedule next occurrence ONLY for self-reminders with remaining repeats
+    # Reschedule next occurrence for any reminder (self OR other) with repeats left.
+    # An "other" reminder re-fires identically each time: push auto-delivers and
+    # WhatsApp/SMS/Email re-enter pending_channels for the creator to send manually.
     updated = await db.reminders.find_one({"id": reminder_id}, {"_id": 0})
     if (
         updated
         and updated.get("status") in ("pending", "active")
-        and is_self
         and (r.get("repeat_count", 1) == -1 or new_triggered < r.get("repeat_count", 1))
     ):
         await _schedule_reminder_job(updated)
@@ -1125,12 +1126,18 @@ async def mark_channel_sent(rid: str, body: MarkSentIn, current=Depends(get_curr
         pending.remove(body.channel)
     update: dict = {"pending_channels": pending}
     if not pending:
-        update["status"] = "completed"
-        update["next_fire_at"] = None
-        try:
-            scheduler.remove_job(_job_id(rid))
-        except Exception:
-            pass
+        # Only finish the reminder when there are no future repeats left. A repeating
+        # reminder stays pending so its next occurrence can re-queue the channels.
+        repeat_count = r.get("repeat_count", 1)
+        triggered = r.get("triggered_count", 0)
+        more_occurrences = repeat_count == -1 or triggered < repeat_count
+        if not more_occurrences:
+            update["status"] = "completed"
+            update["next_fire_at"] = None
+            try:
+                scheduler.remove_job(_job_id(rid))
+            except Exception:
+                pass
     await db.reminders.update_one({"id": rid}, {"$set": update})
     fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
     out = _reminder_to_out(fresh)

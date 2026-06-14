@@ -107,30 +107,33 @@ export default function History() {
         )}
       </View>
 
-      {items.length > 0 && (
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={16} color={colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by title, name, email, phone…"
-            placeholderTextColor={colors.placeholder}
-            value={query}
-            onChangeText={setQuery}
-            testID="history-search"
-          />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery("")} hitSlop={8}>
-              <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+
 
       <FlatList
         data={filtered}
         keyExtractor={(i) => i.id}
         contentContainerStyle={{ padding: spacing.lg, paddingTop: spacing.md, paddingBottom: tabBarSpace + 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
+        ListHeaderComponent={
+          items.length > 0 ? (
+            <View style={[styles.searchWrap, { marginBottom: 16 }]}>
+              <Ionicons name="search" size={16} color={colors.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search by title, name, email, phone…"
+                placeholderTextColor={colors.placeholder}
+                value={query}
+                onChangeText={setQuery}
+                testID="history-search"
+              />
+              {query.length > 0 && (
+                <TouchableOpacity onPress={() => setQuery("")} hitSlop={8}>
+                  <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           loading ? (
             <View style={styles.empty}>
@@ -233,7 +236,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginHorizontal: spacing.lg,
     paddingHorizontal: 14,
     height: 44,
     borderRadius: radius.md,

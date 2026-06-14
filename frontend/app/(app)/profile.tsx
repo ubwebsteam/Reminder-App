@@ -14,6 +14,26 @@ export default function Profile() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  const requestReset = async () => {
+    if (!user?.email) {
+      Alert.alert("Error", "No email associated with this account.");
+      return;
+    }
+    setResetting(true);
+    try {
+      await apiFetch("/auth/reset-password-request", {
+        method: "POST",
+        body: JSON.stringify({ email: user.email }),
+      });
+      Alert.alert("Link sent", "A password reset link has been sent to your email.");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to request password reset.");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
@@ -37,6 +57,14 @@ export default function Profile() {
             <Row icon="notifications-outline" label="Notifications" value={user?.expo_push_token ? "Enabled" : "Not set"} />
             <Divider />
             <Row icon="shield-checkmark-outline" label="Security" value="Password protected" />
+            <Divider />
+            <TouchableOpacity onPress={requestReset} activeOpacity={0.7} testID="reset-password-btn">
+              {resetting ? (
+                <Row icon="key-outline" label="Reset password" value="Sending..." />
+              ) : (
+                <Row icon="key-outline" label="Reset password" chevron />
+              )}
+            </TouchableOpacity>
             <Divider />
             <Row icon="globe-outline" label="Region" value={user?.country_code || "+91"} />
           </Card>

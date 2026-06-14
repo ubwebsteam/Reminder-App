@@ -842,6 +842,27 @@ def _verification_email_html(code: str) -> str:
     """.strip()
 
 
+def _reset_password_email_html(token: str) -> str:
+    link = f"remindly://reset-password?token={token}"
+    return f"""
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;background:#F8F9F7;padding:32px 16px">
+      <div style="background:#fff;border-radius:16px;padding:32px;border:1px solid #E5E7E0">
+        <div style="text-align:center;margin-bottom:24px">
+          <div style="background:#2A4B41;color:#fff;display:inline-block;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:1.5px">RYMIND</div>
+        </div>
+        <h1 style="font-size:22px;color:#1B1F1A;margin:0 0 8px;text-align:center;letter-spacing:-0.5px">Reset your password</h1>
+        <p style="color:#4A5147;font-size:15px;line-height:1.55;text-align:center;margin:0 0 24px">Click the button below to set a new password for your Rymind account.</p>
+        <div style="text-align:center;margin:0 0 24px">
+          <a href="{link}" style="display:inline-block;background:#2A4B41;color:#fff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;font-size:15px">Reset Password</a>
+        </div>
+        <p style="color:#6B756E;font-size:13px;text-align:center;margin:0 0 8px">This link expires in <strong>1 hour</strong>.</p>
+        <p style="color:#94978F;font-size:11px;margin-top:24px;text-align:center">If you didn't request a password reset, you can safely ignore this email.</p>
+      </div>
+      <p style="color:#94978F;font-size:11px;margin-top:16px;text-align:center">&copy; Rymind &middot; rymind.in</p>
+    </div>
+    """.strip()
+
+
 @api.post("/auth/send-code")
 async def send_verification_code(payload: SendCodeIn):
     target = payload.target
@@ -911,6 +932,68 @@ async def verify_code(payload: VerifyCodeIn):
     # Clean up used codes for this target+value
     await db.verification_codes.delete_many({"target": target, "value": value})
     return {"ok": True, "verified": True, "token": token}
+
+
+class ResetPasswordRequestIn(BaseModel):
+    email: str
+
+@api.post("/auth/reset-password-request")
+async def reset_password_request(payload: ResetPasswordRequestIn):
+    email = payload.email.lower().strip()
+    u = await db.users.find_one({"email": email})
+    if not u:
+        return {"ok": True, "message": "If the email is registered, a reset link will be sent."}
+        
+    # Rate limit: max 3 per hour
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    recent_count = await db.password_resets.count_documents({
+        "email": email,
+        "created_at": {"$gte": one_hour_ago},
+    })
+    if recent_count >= 3:
+        raise HTTPException(429, "Too many requests. Please wait before trying again.")
+
+    token = str(uuid.uuid4())
+    await db.password_resets.insert_one({
+        "email": email,
+        "token": token,
+        "created_at": datetime.now(timezone.utc),
+    })
+    
+    html = _reset_password_email_html(token)
+    sent = await send_email(email, "Reset your Rymind password", html)
+    if not sent:
+        logger.info("[reset-password] Email mock for %s: token %s", email, token)
+    
+    return {"ok": True, "message": "If the email is registered, a reset link will be sent."}
+
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=6)
+
+@api.post("/auth/reset-password")
+async def reset_password(payload: ResetPasswordIn):
+    doc = await db.password_resets.find_one({"token": payload.token})
+    if not doc:
+        raise HTTPException(400, "Invalid or expired reset link")
+    
+    # Check expiry (1 hour)
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    # Ensure doc["created_at"] is comparable. It's stored as datetime in MongoDB motor.
+    created_at = doc.get("created_at")
+    if getattr(created_at, "tzinfo", None) is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+        
+    if created_at < one_hour_ago:
+        await db.password_resets.delete_one({"_id": doc["_id"]})
+        raise HTTPException(400, "Reset link has expired")
+        
+    hashed = hash_password(payload.new_password)
+    await db.users.update_one({"email": doc["email"]}, {"$set": {"password_hash": hashed}})
+    await db.password_resets.delete_many({"email": doc["email"]})
+    
+    return {"ok": True, "message": "Password updated successfully"}
 
 
 # ------- Auth — Signup & Login -------

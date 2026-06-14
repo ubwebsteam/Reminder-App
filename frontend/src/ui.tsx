@@ -106,7 +106,7 @@ export function Input({ label, hint, error, style, testID, ...rest }: InpProps) 
       <TextInput
         testID={testID}
         placeholderTextColor={colors.placeholder}
-        style={[inpStyles.input, isEmpty ? { fontStyle: "italic" } : null, error ? { borderColor: colors.danger } : null, style]}
+        style={[inpStyles.input, isEmpty ? { fontStyle: "italic", fontSize: 15 } : null, error ? { borderColor: colors.danger } : null, style]}
         {...rest}
       />
       {hint ? <Text style={inpStyles.hint}>{hint}</Text> : null}

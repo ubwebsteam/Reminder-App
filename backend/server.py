@@ -186,6 +186,8 @@ class ReminderOut(BaseModel):
     last_fired_at: Optional[str] = None
     pending_channels: List[str] = []
     needs_user_send: bool = False
+    contact_id: Optional[str] = None
+    contact_missing: bool = False  # was for a saved contact that has since been deleted
 
 
 class MarkSentIn(BaseModel):
@@ -771,6 +773,7 @@ def _reminder_to_out(r: dict) -> ReminderOut:
         last_fired_at=r.get("last_fired_at"),
         pending_channels=pending,
         needs_user_send=len(pending) > 0,
+        contact_id=r.get("contact_id"),
     )
 
 
@@ -1090,7 +1093,16 @@ async def list_history(current=Depends(get_current_user)):
         {"user_id": current["id"], "status": {"$in": ["completed", "cancelled"]}},
         {"_id": 0},
     ).sort("created_at", -1).to_list(500)
-    return [_reminder_to_out(x) for x in items]
+    # Mark reminders whose linked contact has since been deleted (so the client can
+    # hide reschedule/resend — there's no contact to act on anymore).
+    contact_ids = set(await db.contacts.distinct("id", {"user_id": current["id"]}))
+    out = []
+    for x in items:
+        ro = _reminder_to_out(x)
+        if x.get("contact_id") and x["contact_id"] not in contact_ids:
+            ro.contact_missing = True
+        out.append(ro)
+    return out
 
 
 @api.delete("/reminders/history")
@@ -1188,7 +1200,8 @@ async def reminder_action(rid: str, body: StatusUpdate, current=Depends(get_curr
             pass
     elif body.action == "postpone":
         mins = body.postpone_minutes or 30
-        new_time = datetime.now(timezone.utc) + timedelta(minutes=mins)
+        # Postpone relative to the reminder's own trigger time, not the click time.
+        new_time = _parse_iso(r["scheduled_at"]) + timedelta(minutes=mins)
         await db.reminders.update_one(
             {"id": rid},
             {"$set": {"scheduled_at": new_time.isoformat(), "status": "pending"}},

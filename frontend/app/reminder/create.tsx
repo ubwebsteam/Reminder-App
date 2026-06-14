@@ -561,7 +561,7 @@ export default function CreateReminder() {
                         <View style={[styles.checkbox, savePerson && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
                           {savePerson && <Ionicons name="checkmark" size={14} color="#fff" />}
                         </View>
-                        <Text style={{ color: colors.text }}>Save as a contact for future reminders</Text>
+                        <Text style={{ color: colors.text }}>Save as a contact</Text>
                       </TouchableOpacity>
                     </View>
                   )}

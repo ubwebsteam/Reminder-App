@@ -9,6 +9,7 @@ export const colors = {
   border: "#E5E7E4",
   text: "#121C18",
   textMuted: "#6B756E",
+  placeholder: "#A7AFA9",
   textInverse: "#FFFFFF",
   success: "#3E6955",
   warning: "#D4A373",

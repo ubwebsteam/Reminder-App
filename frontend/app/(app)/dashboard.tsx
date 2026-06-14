@@ -6,6 +6,7 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
   Platform,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -52,6 +53,7 @@ export default function Dashboard() {
   const fabBottom = tabBarSpace + 16;
   const [items, setItems] = useState<Reminder[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
     try {
@@ -59,6 +61,8 @@ export default function Dashboard() {
       setItems(data);
     } catch (e) {
       console.warn(e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -165,7 +169,12 @@ export default function Dashboard() {
           </>
         }
         ListEmptyComponent={
-          items.some((i) => i.needs_user_send) ? null : (
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={[styles.emptySub, { marginTop: 12 }]}>Loading your reminders…</Text>
+            </View>
+          ) : items.some((i) => i.needs_user_send) ? null : (
             <View style={styles.empty}>
               <View style={styles.emptyIcon}>
                 <Ionicons name="checkmark-done-circle" size={42} color={colors.primary} />

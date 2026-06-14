@@ -97,13 +97,16 @@ export function Button({
 /* ---------- Input ---------- */
 type InpProps = TextInputProps & { label?: string; hint?: string; error?: string; testID?: string };
 export function Input({ label, hint, error, style, testID, ...rest }: InpProps) {
+  // Italicise only while empty so the example text reads as a placeholder,
+  // not as real input. Typed text stays upright.
+  const isEmpty = !rest.value;
   return (
     <View style={{ marginBottom: spacing.md }}>
       {label ? <Text style={inpStyles.label}>{label}</Text> : null}
       <TextInput
         testID={testID}
-        placeholderTextColor={colors.textMuted}
-        style={[inpStyles.input, error ? { borderColor: colors.danger } : null, style]}
+        placeholderTextColor={colors.placeholder}
+        style={[inpStyles.input, isEmpty ? { fontStyle: "italic" } : null, error ? { borderColor: colors.danger } : null, style]}
         {...rest}
       />
       {hint ? <Text style={inpStyles.hint}>{hint}</Text> : null}

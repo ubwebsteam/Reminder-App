@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Platform,
   KeyboardAvoidingView,
+  ActivityIndicator,
   Alert,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,12 +37,15 @@ export default function Contacts() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
     try {
       setItems(await apiFetch<Contact[]>("/contacts"));
     } catch (e) {
       console.warn(e);
+    } finally {
+      setLoading(false);
     }
   };
   useFocusEffect(useCallback(() => { load(); }, []));
@@ -109,17 +113,16 @@ export default function Contacts() {
     if (n > 0) {
       Alert.alert(
         "Delete contact?",
-        `There ${n === 1 ? "is" : "are"} ${n} active reminder${n === 1 ? "" : "s"} for ${c.name}. ` +
-          `Deleting this contact will also delete ${n === 1 ? "that reminder" : "those reminders"}. Continue?`,
+        `${c.name} has ${n} active reminder${n === 1 ? "" : "s"}. Deleting this contact will also delete ${n === 1 ? "it" : "them"}. Do you want to delete?`,
         [
-          { text: "Cancel", style: "cancel" },
-          { text: "Delete both", style: "destructive", onPress: () => doDelete(c.id, true) },
+          { text: "No", style: "cancel" },
+          { text: "Yes", style: "destructive", onPress: () => doDelete(c.id, true) },
         ]
       );
     } else {
       Alert.alert("Delete contact?", `Delete ${c.name}?`, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => doDelete(c.id, false) },
+        { text: "No", style: "cancel" },
+        { text: "Yes", style: "destructive", onPress: () => doDelete(c.id, false) },
       ]);
     }
   };
@@ -141,10 +144,17 @@ export default function Contacts() {
         keyExtractor={(i) => i.id}
         contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: tabBarSpace + 24 }}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="people-outline" size={44} color={colors.textMuted} />
-            <Text style={{ color: colors.textMuted, marginTop: 8 }}>No contacts yet</Text>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={{ color: colors.textMuted, marginTop: 10 }}>Loading contacts…</Text>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="people-outline" size={44} color={colors.textMuted} />
+              <Text style={{ color: colors.textMuted, marginTop: 8 }}>No contacts yet</Text>
+            </View>
+          )
         }
         renderItem={({ item }) => (
           <Card style={{ marginBottom: 10, flexDirection: "row", alignItems: "center" }} testID={`contact-${item.id}`}>

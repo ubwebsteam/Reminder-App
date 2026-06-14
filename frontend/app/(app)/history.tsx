@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, RefreshControl, Platform, TouchableOpacity, Alert } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { View, Text, StyleSheet, FlatList, RefreshControl, Platform, TouchableOpacity, TextInput, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,7 +17,8 @@ type Reminder = {
   triggered_count: number;
   repeat_count: number;
   channels: string[];
-  target?: { is_self: boolean; name?: string };
+  target?: { is_self: boolean; name?: string; phone?: string; email?: string };
+  contact_missing?: boolean;
 };
 
 export default function History() {
@@ -26,6 +27,8 @@ export default function History() {
   const tabBarSpace = 60 + Math.max(insets.bottom, Platform.OS === "ios" ? 8 : 6) + 8;
   const [items, setItems] = useState<Reminder[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   const load = async () => {
     try {
@@ -33,8 +36,20 @@ export default function History() {
       setItems(data);
     } catch (e) {
       console.warn(e);
+    } finally {
+      setLoading(false);
     }
   };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((r) =>
+      [r.title, r.message, r.target?.name, r.target?.phone, r.target?.email]
+        .filter(Boolean)
+        .some((f) => String(f).toLowerCase().includes(q))
+    );
+  }, [items, query]);
   useFocusEffect(
     useCallback(() => {
       load();
@@ -91,16 +106,45 @@ export default function History() {
           </TouchableOpacity>
         )}
       </View>
+
+      {items.length > 0 && (
+        <View style={styles.searchWrap}>
+          <Ionicons name="search" size={16} color={colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by title, name, email, phone…"
+            placeholderTextColor={colors.placeholder}
+            value={query}
+            onChangeText={setQuery}
+            testID="history-search"
+          />
+          {query.length > 0 && (
+            <TouchableOpacity onPress={() => setQuery("")} hitSlop={8}>
+              <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       <FlatList
-        data={items}
+        data={filtered}
         keyExtractor={(i) => i.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingTop: 0, paddingBottom: tabBarSpace + 24 }}
+        contentContainerStyle={{ padding: spacing.lg, paddingTop: spacing.md, paddingBottom: tabBarSpace + 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="archive-outline" size={44} color={colors.textMuted} />
-            <Text style={{ color: colors.textMuted, marginTop: 8 }}>Nothing here yet</Text>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={{ color: colors.textMuted, marginTop: 10 }}>Loading history…</Text>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="archive-outline" size={44} color={colors.textMuted} />
+              <Text style={{ color: colors.textMuted, marginTop: 8 }}>
+                {query.trim() ? "No matches found" : "Nothing here yet"}
+              </Text>
+            </View>
+          )
         }
         renderItem={({ item }) => {
           const forOther = item.target && !item.target.is_self;
@@ -121,33 +165,46 @@ export default function History() {
                 <Ionicons name="send-outline" size={13} color={colors.textMuted} />
                 <Text style={styles.meta}>
                   Triggered {item.triggered_count}/{item.repeat_count} time{item.repeat_count === 1 ? "" : "s"}
-                  {forOther ? ` · For ${item.target?.name || "contact"}` : ""}
                 </Text>
               </View>
 
-              {/* Action row */}
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.actionPrimary]}
-                  onPress={() => reschedule(item.id)}
-                  activeOpacity={0.85}
-                  testID={`reschedule-${item.id}`}
-                >
-                  <Ionicons name="refresh" size={15} color="#fff" />
-                  <Text style={styles.actionPrimaryText}>Reschedule</Text>
-                </TouchableOpacity>
-                {forOther && (
+              {forOther && (
+                <View style={styles.recipientBox}>
+                  <Text style={styles.recipientLabel}>FOR</Text>
+                  <Text style={styles.recipientName}>{item.target?.name || "Contact"}</Text>
+                  {item.target?.phone ? <Text style={styles.recipientMeta}>{item.target.phone}</Text> : null}
+                  {item.target?.email ? <Text style={styles.recipientMeta}>{item.target.email}</Text> : null}
+                  {item.contact_missing && (
+                    <Text style={styles.contactGone}>This contact was deleted.</Text>
+                  )}
+                </View>
+              )}
+
+              {/* Action row — hidden when the linked contact has been deleted */}
+              {!item.contact_missing && (
+                <View style={styles.actionRow}>
                   <TouchableOpacity
-                    style={[styles.actionBtn, styles.actionSecondary]}
-                    onPress={() => resend(item.id)}
+                    style={[styles.actionBtn, styles.actionPrimary]}
+                    onPress={() => reschedule(item.id)}
                     activeOpacity={0.85}
-                    testID={`resend-${item.id}`}
+                    testID={`reschedule-${item.id}`}
                   >
-                    <Ionicons name="paper-plane" size={15} color={colors.primary} />
-                    <Text style={styles.actionSecondaryText}>Resend</Text>
+                    <Ionicons name="refresh" size={15} color="#fff" />
+                    <Text style={styles.actionPrimaryText}>Reschedule</Text>
                   </TouchableOpacity>
-                )}
-              </View>
+                  {forOther && (
+                    <TouchableOpacity
+                      style={[styles.actionBtn, styles.actionSecondary]}
+                      onPress={() => resend(item.id)}
+                      activeOpacity={0.85}
+                      testID={`resend-${item.id}`}
+                    >
+                      <Ionicons name="paper-plane" size={15} color={colors.primary} />
+                      <Text style={styles.actionSecondaryText}>Resend</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
             </Card>
           );
         }}
@@ -172,6 +229,29 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   clearText: { color: colors.danger, fontWeight: "700", fontSize: 13 },
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: spacing.lg,
+    paddingHorizontal: 14,
+    height: 44,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  searchInput: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
+  recipientBox: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceAlt,
+  },
+  recipientLabel: { fontSize: 10, fontWeight: "700", color: colors.textMuted, letterSpacing: 1 },
+  recipientName: { fontSize: 14, fontWeight: "700", color: colors.text, marginTop: 2 },
+  recipientMeta: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
+  contactGone: { fontSize: 12, color: colors.danger, marginTop: 4, fontStyle: "italic" },
   cardTitle: { fontSize: 16, fontWeight: "700", color: colors.text, flex: 1, marginRight: 8 },
   msg: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
   meta: { color: colors.textMuted, fontSize: 12, marginLeft: 6 },

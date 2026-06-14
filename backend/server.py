@@ -1235,6 +1235,26 @@ async def delete_reminder(rid: str, current=Depends(get_current_user)):
 
 
 # ------- Contacts -------
+async def _active_reminder_ids_for_contact(uid: str, contact: dict) -> List[str]:
+    """Active reminder ids belonging to a contact — linked by contact_id, OR unlinked
+    (no contact_id) but matching the contact's phone by last-10-digit suffix. The suffix
+    branch catches the first reminder created in the same flow that saved the contact,
+    before the contact id existed."""
+    cid = contact["id"]
+    csuffix = _phone_suffix(contact.get("phone"))
+    ids: List[str] = []
+    async for r in db.reminders.find(
+        {"user_id": uid, "status": {"$in": ["pending", "active"]}},
+        {"_id": 0, "id": 1, "contact_id": 1, "target": 1},
+    ):
+        rcid = r.get("contact_id")
+        if rcid == cid:
+            ids.append(r["id"])
+        elif not rcid and csuffix and _phone_suffix((r.get("target") or {}).get("phone")) == csuffix:
+            ids.append(r["id"])
+    return ids
+
+
 @api.post("/contacts", response_model=ContactOut)
 async def create_contact(payload: ContactCreate, current=Depends(get_current_user)):
     cid = str(uuid.uuid4())
@@ -1292,18 +1312,27 @@ async def update_contact(cid: str, payload: ContactUpdate, current=Depends(get_c
 @api.get("/contacts", response_model=List[ContactOut])
 async def list_contacts(current=Depends(get_current_user)):
     items = await db.contacts.find({"user_id": current["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
-    # Count active (pending/active) reminders linked to each contact
+    # Count active reminders per contact: linked by contact_id, or unlinked but matching
+    # the contact's phone suffix (catches the first reminder saved alongside the contact).
+    valid_ids = {c["id"] for c in items}
+    suffix_to_cid: dict[str, str] = {}
+    for c in items:
+        s = _phone_suffix(c.get("phone"))
+        if s and s not in suffix_to_cid:
+            suffix_to_cid[s] = c["id"]
     counts: dict[str, int] = {}
-    cursor = db.reminders.aggregate([
-        {"$match": {
-            "user_id": current["id"],
-            "status": {"$in": ["pending", "active"]},
-            "contact_id": {"$ne": None},
-        }},
-        {"$group": {"_id": "$contact_id", "count": {"$sum": 1}}},
-    ])
-    async for row in cursor:
-        counts[row["_id"]] = row["count"]
+    async for r in db.reminders.find(
+        {"user_id": current["id"], "status": {"$in": ["pending", "active"]}},
+        {"_id": 0, "contact_id": 1, "target": 1},
+    ):
+        rcid = r.get("contact_id")
+        if rcid and rcid in valid_ids:
+            counts[rcid] = counts.get(rcid, 0) + 1
+        elif not rcid:
+            s = _phone_suffix((r.get("target") or {}).get("phone"))
+            mapped = suffix_to_cid.get(s) if s else None
+            if mapped:
+                counts[mapped] = counts.get(mapped, 0) + 1
     return [ContactOut(**c, active_reminders=counts.get(c["id"], 0)) for c in items]
 
 
@@ -1315,11 +1344,7 @@ async def delete_contact(cid: str, delete_reminders: bool = False, current=Depen
 
     deleted_reminder_ids: List[str] = []
     if delete_reminders:
-        async for r in db.reminders.find(
-            {"user_id": current["id"], "contact_id": cid, "status": {"$in": ["pending", "active"]}},
-            {"_id": 0, "id": 1},
-        ):
-            deleted_reminder_ids.append(r["id"])
+        deleted_reminder_ids = await _active_reminder_ids_for_contact(current["id"], contact)
         if deleted_reminder_ids:
             await db.reminders.delete_many({"id": {"$in": deleted_reminder_ids}, "user_id": current["id"]})
             for rid in deleted_reminder_ids:

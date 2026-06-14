@@ -292,7 +292,7 @@ export default function CreateReminder() {
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 180 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xl + Math.max(insets.bottom, 0) }} keyboardShouldPersistTaps="handled">
           {step === 0 && (
             <>
               <SectionTitle>What should we remind you about?</SectionTitle>
@@ -307,7 +307,6 @@ export default function CreateReminder() {
                 style={{ height: 110, textAlignVertical: "top", paddingTop: 14 }}
                 testID="wizard-message"
               />
-              <Button label="Continue" onPress={next} testID="wizard-next" />
             </>
           )}
 
@@ -451,28 +450,16 @@ export default function CreateReminder() {
                   {contacts.length > 0 && (
                     <>
                       <Text style={styles.label}>Pick from contacts</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: spacing.md }}>
-                        {contacts.map((c) => (
-                          <TouchableOpacity
-                            key={c.id}
-                            style={[
-                              styles.contactPill,
-                              contactId === c.id && { backgroundColor: colors.primary, borderColor: colors.primary },
-                            ]}
-                            onPress={() => {
-                              setContactId(c.id);
-                              setTargetName(c.name);
-                              setTargetPhone(c.phone || "");
-                              setTargetEmail(c.email || "");
-                            }}
-                            testID={`pick-contact-${c.id}`}
-                          >
-                            <Text style={{ color: contactId === c.id ? "#fff" : colors.text, fontWeight: "600" }}>
-                              {c.name}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
+                      <ContactDropdown
+                        contacts={contacts}
+                        selectedId={contactId}
+                        onSelect={(c) => {
+                          setContactId(c.id);
+                          setTargetName(c.name);
+                          setTargetPhone(c.phone || "");
+                          setTargetEmail(c.email || "");
+                        }}
+                      />
                     </>
                   )}
 
@@ -520,19 +507,17 @@ export default function CreateReminder() {
               )}
             </>
           )}
+
+          {/* Action sits right under the step content, not pinned to the bottom */}
+          <View style={{ marginTop: spacing.lg }}>
+            {step < 3 ? (
+              <Button label="Continue" onPress={next} testID="wizard-next" />
+            ) : (
+              <Button label="Create reminder" icon="checkmark-circle" onPress={submit} loading={saving} testID="wizard-submit" />
+            )}
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* Bottom action (step 0 renders Continue inline below the description) */}
-      {step > 0 && (
-        <View style={[styles.footer, { paddingBottom: spacing.lg + Math.max(insets.bottom, 0) }]}>
-          {step < 3 ? (
-            <Button label="Continue" onPress={next} testID="wizard-next" />
-          ) : (
-            <Button label="Create reminder" icon="checkmark-circle" onPress={submit} loading={saving} testID="wizard-submit" />
-          )}
-        </View>
-      )}
 
       {/* Pickers */}
       <PickerSheet visible={showDate} initial={date} mode="date" onClose={() => setShowDate(false)} onConfirm={(d) => setDate(d)} />
@@ -686,6 +671,105 @@ const ddStyles = StyleSheet.create({
   },
 });
 
+function ContactDropdown({
+  contacts,
+  selectedId,
+  onSelect,
+}: {
+  contacts: Contact[];
+  selectedId: string | null;
+  onSelect: (c: Contact) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = contacts.find((c) => c.id === selectedId);
+  return (
+    <View style={{ marginBottom: spacing.md }}>
+      <TouchableOpacity style={cdStyles.trigger} activeOpacity={0.85} onPress={() => setOpen(true)} testID="contact-dropdown">
+        <View style={{ flex: 1 }}>
+          {selected ? (
+            <>
+              <Text style={cdStyles.name}>{selected.name}</Text>
+              {selected.phone ? <Text style={cdStyles.phone}>{selected.phone}</Text> : null}
+            </>
+          ) : (
+            <Text style={{ color: colors.textMuted, fontSize: 15 }}>Select a contact</Text>
+          )}
+        </View>
+        <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
+      </TouchableOpacity>
+      <Modal transparent animationType="fade" visible={open} onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={cdStyles.overlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={cdStyles.menu}>
+            <Text style={cdStyles.menuTitle}>Pick from contacts</Text>
+            <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+              {contacts.map((c) => {
+                const sel = c.id === selectedId;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[cdStyles.row, sel && { backgroundColor: colors.primaryTint }]}
+                    onPress={() => {
+                      onSelect(c);
+                      setOpen(false);
+                    }}
+                    testID={`pick-contact-${c.id}`}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.text, fontSize: 15, fontWeight: "600" }}>{c.name}</Text>
+                      {c.phone ? <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 2 }}>{c.phone}</Text> : null}
+                    </View>
+                    {sel && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </View>
+  );
+}
+
+const cdStyles = StyleSheet.create({
+  trigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 52,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+  },
+  name: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  phone: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
+  overlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: "center", padding: spacing.lg },
+  menu: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingVertical: 6,
+    width: "100%",
+    maxWidth: 380,
+    alignSelf: "center",
+  },
+  menuTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.textMuted,
+    paddingHorizontal: spacing.md,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+  },
+});
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   topRow: {
@@ -712,15 +796,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   pickVal: { color: colors.text, marginLeft: 8, fontWeight: "600" },
-  contactPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    marginRight: 8,
-  },
   repeatSection: {
     marginTop: spacing.lg,
     backgroundColor: colors.surfaceAlt,
@@ -756,17 +831,6 @@ const styles = StyleSheet.create({
     marginRight: 10,
     alignItems: "center",
     justifyContent: "center",
-  },
-  footer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    backgroundColor: colors.background,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
   },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: spacing.lg },
   successCard: {

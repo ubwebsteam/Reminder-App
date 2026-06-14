@@ -239,6 +239,7 @@ class ContactOut(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     created_at: str
+    active_reminders: int = 0
 
 
 # ---------------- Security helpers ----------------
@@ -1209,19 +1210,50 @@ async def update_contact(cid: str, payload: ContactUpdate, current=Depends(get_c
 @api.get("/contacts", response_model=List[ContactOut])
 async def list_contacts(current=Depends(get_current_user)):
     items = await db.contacts.find({"user_id": current["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
-    return [ContactOut(**c) for c in items]
+    # Count active (pending/active) reminders linked to each contact
+    counts: dict[str, int] = {}
+    cursor = db.reminders.aggregate([
+        {"$match": {
+            "user_id": current["id"],
+            "status": {"$in": ["pending", "active"]},
+            "contact_id": {"$ne": None},
+        }},
+        {"$group": {"_id": "$contact_id", "count": {"$sum": 1}}},
+    ])
+    async for row in cursor:
+        counts[row["_id"]] = row["count"]
+    return [ContactOut(**c, active_reminders=counts.get(c["id"], 0)) for c in items]
 
 
 @api.delete("/contacts/{cid}")
-async def delete_contact(cid: str, current=Depends(get_current_user)):
-    res = await db.contacts.delete_one({"id": cid, "user_id": current["id"]})
-    if res.deleted_count == 0:
+async def delete_contact(cid: str, delete_reminders: bool = False, current=Depends(get_current_user)):
+    contact = await db.contacts.find_one({"id": cid, "user_id": current["id"]}, {"_id": 0})
+    if not contact:
         raise HTTPException(404, "Contact not found")
+
+    deleted_reminder_ids: List[str] = []
+    if delete_reminders:
+        async for r in db.reminders.find(
+            {"user_id": current["id"], "contact_id": cid, "status": {"$in": ["pending", "active"]}},
+            {"_id": 0, "id": 1},
+        ):
+            deleted_reminder_ids.append(r["id"])
+        if deleted_reminder_ids:
+            await db.reminders.delete_many({"id": {"$in": deleted_reminder_ids}, "user_id": current["id"]})
+            for rid in deleted_reminder_ids:
+                try:
+                    scheduler.remove_job(_job_id(rid))
+                except Exception:
+                    pass
+
+    await db.contacts.delete_one({"id": cid, "user_id": current["id"]})
     try:
         await broadcast_to_user(current["id"], {"type": "contact.deleted", "data": {"id": cid}})
+        for rid in deleted_reminder_ids:
+            await broadcast_to_user(current["id"], {"type": "reminder.deleted", "data": {"id": rid}})
     except Exception as e:
         logger.debug("[ws] broadcast contact.deleted failed: %s", e)
-    return {"ok": True}
+    return {"ok": True, "deleted_reminders": len(deleted_reminder_ids)}
 
 
 # =====================================================================

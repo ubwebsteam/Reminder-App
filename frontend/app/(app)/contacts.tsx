@@ -20,7 +20,7 @@ import { colors, radius, shadow, spacing } from "../../src/theme";
 import { Button, Card, Input } from "../../src/ui";
 import { COUNTRIES, isValidPhoneNumber, phoneDigits, splitPhone } from "../../src/countries";
 
-type Contact = { id: string; name: string; phone?: string; email?: string };
+type Contact = { id: string; name: string; phone?: string; email?: string; active_reminders?: number };
 
 export default function Contacts() {
   const insets = useSafeAreaInsets();
@@ -91,12 +91,32 @@ export default function Contacts() {
     }
   };
 
-  const remove = async (id: string) => {
+  const doDelete = async (id: string, withReminders: boolean) => {
     try {
-      await apiFetch(`/contacts/${id}`, { method: "DELETE" });
+      await apiFetch(`/contacts/${id}${withReminders ? "?delete_reminders=true" : ""}`, { method: "DELETE" });
       await load();
     } catch (e: any) {
       Alert.alert("Error", e.message);
+    }
+  };
+
+  const remove = (c: Contact) => {
+    const n = c.active_reminders || 0;
+    if (n > 0) {
+      Alert.alert(
+        "Delete contact?",
+        `There ${n === 1 ? "is" : "are"} ${n} active reminder${n === 1 ? "" : "s"} for ${c.name}. ` +
+          `Deleting this contact will also delete ${n === 1 ? "that reminder" : "those reminders"}. Continue?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete both", style: "destructive", onPress: () => doDelete(c.id, true) },
+        ]
+      );
+    } else {
+      Alert.alert("Delete contact?", `Delete ${c.name}?`, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => doDelete(c.id, false) },
+      ]);
     }
   };
 
@@ -135,7 +155,7 @@ export default function Contacts() {
             <TouchableOpacity onPress={() => openEdit(item)} hitSlop={12} style={{ marginRight: 16 }} testID={`edit-contact-${item.id}`}>
               <Ionicons name="create-outline" size={20} color={colors.primary} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => remove(item.id)} hitSlop={12} testID={`delete-contact-${item.id}`}>
+            <TouchableOpacity onPress={() => remove(item)} hitSlop={12} testID={`delete-contact-${item.id}`}>
               <Ionicons name="trash-outline" size={20} color={colors.danger} />
             </TouchableOpacity>
           </Card>

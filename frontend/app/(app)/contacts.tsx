@@ -19,6 +19,7 @@ import { useAuth } from "../../src/auth";
 import { colors, radius, shadow, spacing } from "../../src/theme";
 import { Button, Card, Input } from "../../src/ui";
 import { COUNTRIES, isValidPhoneNumber, phoneDigits, splitPhone } from "../../src/countries";
+import { isValidEmail } from "../../src/utils";
 
 type Contact = { id: string; name: string; phone?: string; email?: string; active_reminders?: number };
 
@@ -69,6 +70,9 @@ export default function Contacts() {
     if (!phone.trim()) return Alert.alert("Phone required", "A contact must have a phone number.");
     if (!isValidPhoneNumber(phone)) {
       return Alert.alert("Invalid phone number", "Please enter a valid phone number.");
+    }
+    if (email.trim() && !isValidEmail(email)) {
+      return Alert.alert("Invalid email", "Please enter a valid email address.");
     }
     setSaving(true);
     try {

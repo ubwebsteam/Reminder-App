@@ -441,7 +441,7 @@ def _job_id(reminder_id: str) -> str:
     return f"reminder:{reminder_id}"
 
 
-async def _schedule_reminder_job(reminder: dict) -> None:
+async def _schedule_reminder_job(reminder: dict, force_run_at: Optional[datetime] = None) -> None:
     rid = reminder["id"]
     try:
         scheduler.remove_job(_job_id(rid))
@@ -449,7 +449,9 @@ async def _schedule_reminder_job(reminder: dict) -> None:
         pass
     if reminder.get("status") not in (None, "pending", "active"):
         return
-    nxt = _compute_next_fire(reminder)
+    # force_run_at overrides the repeat math — used by postpone/snooze so an
+    # already-fired reminder fires again instead of being marked completed.
+    nxt = force_run_at or _compute_next_fire(reminder)
     if not nxt:
         await db.reminders.update_one({"id": rid}, {"$set": {"status": "completed", "next_fire_at": None}})
         return
@@ -1058,6 +1060,19 @@ async def list_history(current=Depends(get_current_user)):
     return [_reminder_to_out(x) for x in items]
 
 
+@api.delete("/reminders/history")
+async def clear_history(current=Depends(get_current_user)):
+    """Delete all finished (completed/cancelled) reminders for the user."""
+    res = await db.reminders.delete_many(
+        {"user_id": current["id"], "status": {"$in": ["completed", "cancelled"]}}
+    )
+    try:
+        await broadcast_to_user(current["id"], {"type": "history.cleared", "data": {}})
+    except Exception as e:
+        logger.debug("[ws] broadcast history.cleared failed: %s", e)
+    return {"ok": True, "deleted": res.deleted_count}
+
+
 @api.get("/reminders/{rid}", response_model=ReminderOut)
 async def get_reminder(rid: str, current=Depends(get_current_user)):
     r = await db.reminders.find_one({"id": rid, "user_id": current["id"]}, {"_id": 0})
@@ -1140,7 +1155,8 @@ async def reminder_action(rid: str, body: StatusUpdate, current=Depends(get_curr
             {"$set": {"scheduled_at": new_time.isoformat(), "status": "pending"}},
         )
         fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
-        await _schedule_reminder_job(fresh)
+        # Force the next fire to the snooze time regardless of triggered/repeat count
+        await _schedule_reminder_job(fresh, force_run_at=new_time)
     fresh = await db.reminders.find_one({"id": rid}, {"_id": 0})
     out = _reminder_to_out(fresh)
     try:
@@ -1199,9 +1215,23 @@ async def update_contact(cid: str, payload: ContactUpdate, current=Depends(get_c
         "email": (payload.email or "").strip() or None,
     }
     await db.contacts.update_one({"id": cid, "user_id": current["id"]}, {"$set": updates})
+
+    # Contact is the single source of truth: push the new details into every
+    # reminder linked to this contact so active/pending and resend flows stay current.
+    await db.reminders.update_many(
+        {"user_id": current["id"], "contact_id": cid},
+        {"$set": {
+            "target.name": updates["name"],
+            "target.phone": updates["phone"],
+            "target.email": updates["email"],
+        }},
+    )
+
     out = ContactOut(**{**existing, **updates})
     try:
         await broadcast_to_user(current["id"], {"type": "contact.updated", "data": out.model_dump()})
+        async for r in db.reminders.find({"user_id": current["id"], "contact_id": cid}, {"_id": 0}):
+            await broadcast_to_user(current["id"], {"type": "reminder.updated", "data": _reminder_to_out(r).model_dump()})
     except Exception as e:
         logger.debug("[ws] broadcast contact.updated failed: %s", e)
     return out

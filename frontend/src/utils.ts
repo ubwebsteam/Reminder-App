@@ -28,3 +28,9 @@ export function combineDateTime(date: Date, time: Date): Date {
   d.setHours(time.getHours(), time.getMinutes(), 0, 0);
   return d;
 }
+
+export function isValidEmail(value: string): boolean {
+  const v = (value || "").trim();
+  // Pragmatic check: non-empty local part, single @, dotted domain
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}

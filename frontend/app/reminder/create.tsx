@@ -20,7 +20,7 @@ import { PickerSheet } from "../../src/PickerSheet";
 import { colors, radius, spacing } from "../../src/theme";
 import { apiFetch } from "../../src/api";
 import { useAuth } from "../../src/auth";
-import { combineDateTime, fmtDate } from "../../src/utils";
+import { combineDateTime, fmtDate, isValidEmail } from "../../src/utils";
 import { maybeAskForRating, recordReminderCreated } from "../../src/rating";
 import { isValidPhoneNumber } from "../../src/countries";
 
@@ -90,6 +90,7 @@ export default function CreateReminder() {
 
   // Step 4
   const [isSelf, setIsSelf] = useState(true);
+  const [targetMode, setTargetMode] = useState<"existing" | "new" | null>(null);
   const [targetName, setTargetName] = useState("");
   const [targetPhone, setTargetPhone] = useState("");
   const [targetEmail, setTargetEmail] = useState("");
@@ -150,6 +151,7 @@ export default function CreateReminder() {
         setTargetPhone(t.phone || "");
         setTargetEmail(t.email || "");
         if (r.contact_id) setContactId(r.contact_id);
+        if (!t.is_self) setTargetMode(r.contact_id ? "existing" : "new");
       } catch (e) {
         // silently ignore — user will fill manually
       }
@@ -175,6 +177,26 @@ export default function CreateReminder() {
   // Push/WhatsApp/SMS all need the recipient's number; email-only does not.
   const recipientNeedsPhone =
     channels.includes("push") || channels.includes("whatsapp") || channels.includes("sms");
+
+  const selectedContact = contacts.find((c) => c.id === contactId) || null;
+
+  const chooseExisting = () => {
+    if (targetMode === "existing") return;
+    setTargetMode("existing");
+    setSavePerson(false);
+    setContactId(null);
+    setTargetName("");
+    setTargetPhone("");
+    setTargetEmail("");
+  };
+  const chooseNew = () => {
+    if (targetMode === "new") return;
+    setTargetMode("new");
+    setContactId(null);
+    setTargetName("");
+    setTargetPhone("");
+    setTargetEmail("");
+  };
 
   const finalDateTime = combineDateTime(date, time);
 
@@ -202,13 +224,26 @@ export default function CreateReminder() {
       if (channels.length === 0) return "Select at least one delivery method.";
     } else if (step === 3) {
       if (!isSelf) {
-        if (!targetName.trim()) return "Enter contact name.";
-        // Required whenever a phone-based channel (incl. App Notification) is selected
-        if (recipientNeedsPhone) {
-          if (!targetPhone.trim()) return "Phone number is required.";
-          if (!isValidPhoneNumber(targetPhone)) return "Enter a valid phone number.";
+        if (!targetMode) return "Choose an existing contact or a new person.";
+        if (targetMode === "existing") {
+          if (!contactId) return "Please select a contact.";
+          if (channels.includes("email") && !(selectedContact?.email || "").trim()) {
+            return "This contact has no email saved. Edit the contact or remove the Email channel.";
+          }
+        } else {
+          if (!targetName.trim()) return "Enter contact name.";
+          // Required whenever a phone-based channel (incl. App Notification) is selected
+          if (recipientNeedsPhone) {
+            if (!targetPhone.trim()) return "Phone number is required.";
+            if (!isValidPhoneNumber(targetPhone)) return "Enter a valid phone number.";
+          }
+          if (channels.includes("email")) {
+            if (!targetEmail.trim()) return "Email required.";
+            if (!isValidEmail(targetEmail)) return "Enter a valid email address.";
+          } else if (targetEmail.trim() && !isValidEmail(targetEmail)) {
+            return "Enter a valid email address.";
+          }
         }
-        if (channels.includes("email") && !targetEmail.trim()) return "Email required.";
       }
     }
     return null;
@@ -447,8 +482,27 @@ export default function CreateReminder() {
 
               {!isSelf && (
                 <>
-                  {contacts.length > 0 && (
-                    <>
+                  <OptionCheckbox
+                    label="Send to an existing contact"
+                    selected={targetMode === "existing"}
+                    onPress={chooseExisting}
+                    disabled={contacts.length === 0}
+                    testID="target-mode-existing"
+                  />
+                  <OptionCheckbox
+                    label="Send to a new person"
+                    selected={targetMode === "new"}
+                    onPress={chooseNew}
+                    testID="target-mode-new"
+                  />
+                  {contacts.length === 0 && (
+                    <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: spacing.sm }}>
+                      No saved contacts yet — choose "Send to a new person".
+                    </Text>
+                  )}
+
+                  {targetMode === "existing" && contacts.length > 0 && (
+                    <View style={{ marginTop: spacing.md }}>
                       <Text style={styles.label}>Pick from contacts</Text>
                       <ContactDropdown
                         contacts={contacts}
@@ -460,48 +514,56 @@ export default function CreateReminder() {
                           setTargetEmail(c.email || "");
                         }}
                       />
-                    </>
+                      {selectedContact && (
+                        <Card style={{ marginTop: 4 }}>
+                          <ReadOnlyRow label="Name" value={selectedContact.name} />
+                          {selectedContact.phone ? <ReadOnlyRow label="Phone" value={selectedContact.phone} /> : null}
+                          {selectedContact.email ? <ReadOnlyRow label="Email" value={selectedContact.email} /> : null}
+                        </Card>
+                      )}
+                    </View>
                   )}
 
-                  <Input label="Name" placeholder="Recipient name" value={targetName} onChangeText={setTargetName} testID="target-name" />
-                  {recipientNeedsPhone && (
-                    <Input
-                      label={phoneFieldLabel}
-                      placeholder="+91 9876543210"
-                      keyboardType="phone-pad"
-                      value={targetPhone}
-                      onChangeText={setTargetPhone}
-                      hint={
-                        channels.includes("whatsapp") || channels.includes("sms")
-                          ? undefined
-                          : "Used to find their app and deliver the notification. If they're not on the app, the reminder comes to you to forward."
-                      }
-                      testID="target-phone"
-                    />
-                  )}
-                  {channels.includes("email") && (
-                    <Input
-                      label="Email"
-                      placeholder="person@example.com"
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                      value={targetEmail}
-                      onChangeText={setTargetEmail}
-                      testID="target-email"
-                    />
-                  )}
-
-                  {!contactId && (
-                    <TouchableOpacity
-                      style={styles.checkRow}
-                      onPress={() => setSavePerson(!savePerson)}
-                      testID="save-person-toggle"
-                    >
-                      <View style={[styles.checkbox, savePerson && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                        {savePerson && <Ionicons name="checkmark" size={14} color="#fff" />}
-                      </View>
-                      <Text style={{ color: colors.text }}>Save this person for future reminders</Text>
-                    </TouchableOpacity>
+                  {targetMode === "new" && (
+                    <View style={{ marginTop: spacing.md }}>
+                      <Input label="Name" placeholder="Recipient name" value={targetName} onChangeText={setTargetName} testID="target-name" />
+                      {recipientNeedsPhone && (
+                        <Input
+                          label={phoneFieldLabel}
+                          placeholder="+91 9876543210"
+                          keyboardType="phone-pad"
+                          value={targetPhone}
+                          onChangeText={setTargetPhone}
+                          hint={
+                            channels.includes("whatsapp") || channels.includes("sms")
+                              ? undefined
+                              : "Used to find their app and deliver the notification. If they're not on the app, the reminder comes to you to forward."
+                          }
+                          testID="target-phone"
+                        />
+                      )}
+                      {channels.includes("email") && (
+                        <Input
+                          label="Email"
+                          placeholder="person@example.com"
+                          autoCapitalize="none"
+                          keyboardType="email-address"
+                          value={targetEmail}
+                          onChangeText={setTargetEmail}
+                          testID="target-email"
+                        />
+                      )}
+                      <TouchableOpacity
+                        style={styles.checkRow}
+                        onPress={() => setSavePerson(!savePerson)}
+                        testID="save-person-toggle"
+                      >
+                        <View style={[styles.checkbox, savePerson && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
+                          {savePerson && <Ionicons name="checkmark" size={14} color="#fff" />}
+                        </View>
+                        <Text style={{ color: colors.text }}>Save as a contact for future reminders</Text>
+                      </TouchableOpacity>
+                    </View>
                   )}
                 </>
               )}
@@ -770,6 +832,44 @@ const cdStyles = StyleSheet.create({
   },
 });
 
+function OptionCheckbox({
+  label,
+  selected,
+  onPress,
+  disabled,
+  testID,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  disabled?: boolean;
+  testID?: string;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.optionRow, selected && styles.optionRowActive, disabled && { opacity: 0.4 }]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.85}
+      testID={testID}
+    >
+      <View style={[styles.checkbox, selected && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
+        {selected && <Ionicons name="checkmark" size={14} color="#fff" />}
+      </View>
+      <Text style={{ color: colors.text, fontWeight: "600", flex: 1 }}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ paddingVertical: 6 }}>
+      <Text style={{ color: colors.textMuted, fontSize: 12 }}>{label}</Text>
+      <Text style={{ color: colors.text, fontSize: 15, fontWeight: "600", marginTop: 2 }}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   topRow: {
@@ -822,6 +922,18 @@ const styles = StyleSheet.create({
   },
   repeatHint: { fontSize: 12, color: colors.textMuted, marginTop: 6 },
   checkRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
+  optionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    marginBottom: 8,
+  },
+  optionRowActive: { borderColor: colors.primary, backgroundColor: colors.primaryTint },
   checkbox: {
     width: 22,
     height: 22,

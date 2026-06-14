@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, RefreshControl, Platform, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, FlatList, RefreshControl, Platform, TouchableOpacity, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -55,11 +55,41 @@ export default function History() {
     router.push({ pathname: "/reminder/[id]", params: { id } });
   };
 
+  const clearAll = () => {
+    Alert.alert(
+      "Clear all history?",
+      "This permanently deletes all completed and cancelled reminders. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear all",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await apiFetch("/reminders/history", { method: "DELETE" });
+              await load();
+            } catch (e: any) {
+              Alert.alert("Error", e.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>History</Text>
-        <Text style={styles.sub}>Your past reminders and their outcomes.</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>History</Text>
+          <Text style={styles.sub}>Your past reminders and their outcomes.</Text>
+        </View>
+        {items.length > 0 && (
+          <TouchableOpacity style={styles.clearBtn} onPress={clearAll} testID="clear-history" hitSlop={8}>
+            <Ionicons name="trash-outline" size={15} color={colors.danger} />
+            <Text style={styles.clearText}>Clear all</Text>
+          </TouchableOpacity>
+        )}
       </View>
       <FlatList
         data={items}
@@ -127,9 +157,21 @@ export default function History() {
 }
 
 const styles = StyleSheet.create({
-  header: { padding: spacing.lg },
+  header: { padding: spacing.lg, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
   title: { fontSize: 28, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   sub: { color: colors.textMuted, fontSize: 14, marginTop: 4 },
+  clearBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    marginTop: 4,
+  },
+  clearText: { color: colors.danger, fontWeight: "700", fontSize: 13 },
   cardTitle: { fontSize: 16, fontWeight: "700", color: colors.text, flex: 1, marginRight: 8 },
   msg: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
   meta: { color: colors.textMuted, fontSize: 12, marginLeft: 6 },

@@ -1078,12 +1078,33 @@ async def create_reminder(payload: ReminderCreate, current=Depends(get_current_u
     return out
 
 
+async def _resolve_unlinked_contacts(uid: str, reminders: list[dict]) -> None:
+    unlinked = [r for r in reminders if not r.get("contact_id") and (r.get("target") or {}).get("phone")]
+    if not unlinked:
+        return
+    contacts = await db.contacts.find({"user_id": uid}, {"_id": 0, "id": 1, "phone": 1}).to_list(500)
+    suffix_to_cid = {}
+    for c in contacts:
+        s = _phone_suffix(c.get("phone"))
+        if s and s not in suffix_to_cid:
+            suffix_to_cid[s] = c["id"]
+    if not suffix_to_cid:
+        return
+    for r in unlinked:
+        s = _phone_suffix(r["target"]["phone"])
+        if s and s in suffix_to_cid:
+            cid = suffix_to_cid[s]
+            r["contact_id"] = cid
+            asyncio.create_task(db.reminders.update_one({"id": r["id"]}, {"$set": {"contact_id": cid}}))
+
+
 @api.get("/reminders", response_model=List[ReminderOut])
 async def list_active_reminders(current=Depends(get_current_user)):
     items = await db.reminders.find(
         {"user_id": current["id"], "status": {"$in": ["pending", "active"]}},
         {"_id": 0},
     ).sort("scheduled_at", 1).to_list(500)
+    await _resolve_unlinked_contacts(current["id"], items)
     return [_reminder_to_out(x) for x in items]
 
 
@@ -1093,6 +1114,7 @@ async def list_history(current=Depends(get_current_user)):
         {"user_id": current["id"], "status": {"$in": ["completed", "cancelled"]}},
         {"_id": 0},
     ).sort("created_at", -1).to_list(500)
+    await _resolve_unlinked_contacts(current["id"], items)
     # Mark reminders whose linked contact has since been deleted (so the client can
     # hide reschedule/resend — there's no contact to act on anymore).
     contact_ids = set(await db.contacts.distinct("id", {"user_id": current["id"]}))
@@ -1123,6 +1145,7 @@ async def get_reminder(rid: str, current=Depends(get_current_user)):
     r = await db.reminders.find_one({"id": rid, "user_id": current["id"]}, {"_id": 0})
     if not r:
         raise HTTPException(404, "Reminder not found")
+    await _resolve_unlinked_contacts(current["id"], [r])
     return _reminder_to_out(r)
 
 

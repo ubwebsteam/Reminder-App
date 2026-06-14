@@ -1548,6 +1548,27 @@ async def get_admin_analytics():
     }
 
 
+@api.get("/admin/user-activity")
+async def get_admin_user_activity():
+    """Every reminder created across all users (newest first) with creator name/email
+    and its selected delivery channels. Temporary internal monitoring tool, behind the
+    obfuscated admin URL like /admin/analytics."""
+    user_docs = await db.users.find(
+        {}, {"_id": 0, "id": 1, "full_name": 1, "email": 1}
+    ).to_list(5000)
+    users = {u["id"]: u for u in user_docs}
+
+    reminders = await db.reminders.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    items = []
+    for r in reminders:
+        u = users.get(r.get("user_id"), {})
+        out = _reminder_to_out(r).model_dump()
+        out["user_name"] = u.get("full_name", "Unknown")
+        out["user_email"] = u.get("email", "")
+        items.append(out)
+    return {"reminders": items, "total": len(items)}
+
+
 app.include_router(api)
 
 

@@ -34,6 +34,16 @@ type Reminder = {
   needs_user_send?: boolean;
 };
 
+function fmtInterval(h: number): string {
+  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  if (h > 0 && h % 8760 === 0) return plural(h / 8760, "year");
+  if (h > 0 && h % 720 === 0) return plural(h / 720, "month");
+  if (h > 0 && h % 168 === 0) return plural(h / 168, "week");
+  if (h > 0 && h % 24 === 0) return plural(h / 24, "day");
+  if (h >= 1) return plural(h, "hour");
+  return `${Math.round(h * 60)} min`;
+}
+
 const CHANNEL_META: Record<string, { icon: any; label: string }> = {
   push: { icon: "notifications-outline", label: "App Notification" },
   whatsapp: { icon: "logo-whatsapp", label: "WhatsApp" },
@@ -189,7 +199,15 @@ export default function ReminderDetail() {
             </>
           )}
           <Divider />
-          <Row icon="repeat-outline" label="Repeats" value={`${r.triggered_count}/${r.repeat_count === -1 ? "∞" : r.repeat_count} times · every ${r.repeat_interval_hours}h`} />
+          <Row
+            icon="repeat-outline"
+            label="Repeats"
+            value={
+              r.repeat_count === 1
+                ? "One-time"
+                : `${r.triggered_count}/${r.repeat_count === -1 ? "∞" : r.repeat_count} times · every ${fmtInterval(r.repeat_interval_hours)}`
+            }
+          />
           {r.lead_minutes > 0 && (
             <>
               <Divider />

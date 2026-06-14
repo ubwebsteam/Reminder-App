@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Application from "expo-application";
+import Constants from "expo-constants";
 import { useAuth } from "../../src/auth";
 import { apiFetch } from "../../src/api";
 import { Button, Card, SectionTitle } from "../../src/ui";
@@ -141,7 +142,7 @@ export default function Profile() {
           </Card>
         </View>
 
-        <Text style={styles.footer}>Rymind · v{Application.nativeApplicationVersion || "1.0.2"}</Text>
+        <Text style={styles.footer}>Rymind · v{Application.nativeApplicationVersion || Constants.expoConfig?.version || ""}</Text>
       </ScrollView>
     </SafeAreaView>
   );

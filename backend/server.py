@@ -309,7 +309,26 @@ async def send_expo_push(token: str, title: str, body: str, data: dict | None = 
                 headers={"Content-Type": "application/json"},
             )
         logger.info("[push] -> %s %s", resp.status_code, resp.text[:120])
-        return resp.status_code == 200
+        if resp.status_code != 200:
+            return False
+        # Expo returns HTTP 200 even for per-ticket errors — inspect the body.
+        try:
+            ticket = (resp.json() or {}).get("data") or {}
+        except Exception:
+            ticket = {}
+        if isinstance(ticket, dict) and ticket.get("status") == "error":
+            err = (ticket.get("details") or {}).get("error")
+            logger.warning("[push] ticket error: %s", err)
+            if err == "DeviceNotRegistered":
+                # Token is dead (app uninstalled / token rotated) — drop it everywhere.
+                try:
+                    await db.users.update_many(
+                        {"expo_push_token": token}, {"$set": {"expo_push_token": None}}
+                    )
+                except Exception as e:
+                    logger.debug("[push] failed clearing dead token: %s", e)
+            return False
+        return True
     except Exception as e:
         logger.warning("[push] failed: %s", e)
         return False
@@ -641,13 +660,16 @@ async def _fire_reminder(reminder_id: str) -> None:
     }
     await db.reminder_logs.insert_one(log_entry)
 
-    # - self: complete when triggered_count reaches repeat_count (if not unlimited)
-    # - other: never auto-complete; user must tap Send for each pending channel
-    if is_self:
-        repeat_count = r.get("repeat_count", 1)
-        if repeat_count != -1 and new_triggered >= repeat_count:
-            update["status"] = "completed"
-            update["next_fire_at"] = None
+    # Complete when repeats are exhausted AND nothing is awaiting manual send.
+    # - self: no pending channels, so completes once repeats run out.
+    # - other with WhatsApp/SMS/Email: stays pending until the user taps Send
+    #   (mark-sent completes it); the repeat cap still applies via that path.
+    # - other push-only: no pending channels, so it completes instead of lingering.
+    repeat_count = r.get("repeat_count", 1)
+    repeats_done = repeat_count != -1 and new_triggered >= repeat_count
+    if repeats_done and not update.get("pending_channels"):
+        update["status"] = "completed"
+        update["next_fire_at"] = None
 
     await db.reminders.update_one({"id": reminder_id}, {"$set": update})
 
@@ -868,7 +890,16 @@ async def verify_code(payload: VerifyCodeIn):
         {"target": target, "value": value},
         sort=[("created_at", -1)],
     )
-    if not doc or doc.get("code") != code:
+    if not doc:
+        return {"ok": False, "verified": False, "message": "Invalid or expired code"}
+
+    # Throttle guessing: invalidate the code after too many wrong attempts
+    if doc.get("attempts", 0) >= 5:
+        await db.verification_codes.delete_many({"target": target, "value": value})
+        return {"ok": False, "verified": False, "message": "Too many incorrect attempts. Request a new code."}
+
+    if doc.get("code") != code:
+        await db.verification_codes.update_one({"_id": doc["_id"]}, {"$inc": {"attempts": 1}})
         return {"ok": False, "verified": False, "message": "Invalid or expired code"}
 
     # Code matches — issue a short-lived verification token
@@ -946,22 +977,23 @@ async def delete_account(current=Depends(get_current_user)):
     uid = current["id"]
     logger.info("[account] deleting user %s (%s)", uid, current.get("email"))
 
-    # 1. Cancel all scheduled reminder jobs for this user
+    # 1. Fetch every reminder (any status) — ids for log cleanup, active ones for job cancel
     user_reminders = await db.reminders.find(
-        {"user_id": uid, "status": {"$in": ["pending", "active"]}},
-        {"_id": 0, "id": 1},
-    ).to_list(1000)
+        {"user_id": uid}, {"_id": 0, "id": 1, "status": 1}
+    ).to_list(5000)
+    all_reminder_ids = [r["id"] for r in user_reminders]
     for r in user_reminders:
-        try:
-            scheduler.remove_job(_job_id(r["id"]))
-        except Exception:
-            pass
+        if r.get("status") in ("pending", "active"):
+            try:
+                scheduler.remove_job(_job_id(r["id"]))
+            except Exception:
+                pass
 
     # 2. Delete all data from every collection
     del_reminders = await db.reminders.delete_many({"user_id": uid})
     del_contacts = await db.contacts.delete_many({"user_id": uid})
     del_logs = await db.reminder_logs.delete_many(
-        {"reminder_id": {"$in": [r["id"] for r in user_reminders]}}
+        {"reminder_id": {"$in": all_reminder_ids}}
     )
     del_sessions = await db.web_sessions.delete_many({"user_id": uid})
     del_codes = await db.verification_codes.delete_many(

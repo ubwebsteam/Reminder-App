@@ -54,6 +54,10 @@ TWILIO_WA_CONTENT_SID = os.environ.get("TWILIO_WA_CONTENT_SID", "")
 RESEND_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 
+# Base URL of the web app — used for clickable email links (custom app schemes
+# like remindly:// are not clickable in email clients). Override via env if needed.
+WEB_APP_URL = os.environ.get("WEB_APP_URL", "https://www.rymind.in").rstrip("/")
+
 # ---------------- DB ----------------
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -843,7 +847,9 @@ def _verification_email_html(code: str) -> str:
 
 
 def _reset_password_email_html(token: str) -> str:
-    link = f"remindly://reset-password?token={token}"
+    # Must be an https link — custom app schemes (remindly://) are not clickable in
+    # email clients. Points to the web app's reset page, which calls /auth/reset-password.
+    link = f"{WEB_APP_URL}/reset-password?token={token}"
     return f"""
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;background:#F8F9F7;padding:32px 16px">
       <div style="background:#fff;border-radius:16px;padding:32px;border:1px solid #E5E7E0">

@@ -59,7 +59,17 @@ RESEND_FROM = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 WEB_APP_URL = os.environ.get("WEB_APP_URL", "https://www.rymind.in").rstrip("/")
 
 # ---------------- DB ----------------
-client = AsyncIOMotorClient(MONGO_URL)
+# Tuned pool + timeouts: keep warm connections (less churn / fewer dropped SYNs) and
+# fail fast on a bad connection instead of hanging ~30s (default serverSelectionTimeoutMS).
+client = AsyncIOMotorClient(
+    MONGO_URL,
+    serverSelectionTimeoutMS=5000,
+    connectTimeoutMS=5000,
+    socketTimeoutMS=10000,
+    maxPoolSize=50,
+    minPoolSize=5,
+    retryWrites=True,
+)
 db = client[DB_NAME]
 
 # ---------------- Scheduler ----------------
@@ -995,7 +1005,7 @@ async def reset_password(payload: ResetPasswordIn):
         await db.password_resets.delete_one({"_id": doc["_id"]})
         raise HTTPException(400, "Reset link has expired")
         
-    hashed = hash_password(payload.new_password)
+    hashed = await asyncio.to_thread(hash_password, payload.new_password)
     await db.users.update_one({"email": doc["email"]}, {"$set": {"password_hash": hashed}})
     await db.password_resets.delete_many({"email": doc["email"]})
     
@@ -1030,7 +1040,7 @@ async def signup(payload: UserSignup):
         "phone_suffix": _phone_suffix(phone_full),
         "country_code": payload.country_code,
         "full_name": payload.full_name.strip(),
-        "password_hash": hash_password(payload.password),
+        "password_hash": await asyncio.to_thread(hash_password, payload.password),
         "expo_push_token": None,
         "created_at": now,
         "last_login_at": now,
@@ -1043,7 +1053,7 @@ async def signup(payload: UserSignup):
 @api.post("/auth/login", response_model=TokenOut)
 async def login(payload: UserLogin):
     u = await db.users.find_one({"email": payload.email.lower().strip()})
-    if not u or not verify_password(payload.password, u["password_hash"]):
+    if not u or not await asyncio.to_thread(verify_password, payload.password, u["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
     
     now = datetime.now(timezone.utc).isoformat()
@@ -1670,24 +1680,34 @@ async def ws_web_session(websocket: WebSocket, session_id: str):
 # ------- Admin Analytics -------
 @api.get("/admin/analytics")
 async def get_admin_analytics():
-    total_users = await db.users.count_documents({})
-    total_devices = await db.users.count_documents({"expo_push_token": {"$ne": None}})
-    
-    distribution_cursor = db.users.aggregate([
-        {"$group": {"_id": "$country_code", "count": {"$sum": 1}}}
-    ])
-    distribution = [{"region": d["_id"] or "Unknown", "count": d["count"]} for d in await distribution_cursor.to_list(100)]
-    
-    recent_users_cursor = db.users.find({}, {"_id": 0, "full_name": 1, "email": 1, "last_login_at": 1, "created_at": 1}).sort("last_login_at", -1).limit(50)
-    recent_users = await recent_users_cursor.to_list(50)
+    # These queries are independent — run them concurrently instead of sequentially
+    # (was ~8 round-trips back-to-back; now a single batch).
+    (
+        total_users,
+        total_devices,
+        distribution_docs,
+        recent_users,
+        total_reminders,
+        active_reminders,
+        completed_reminders,
+        total_triggers,
+    ) = await asyncio.gather(
+        db.users.count_documents({}),
+        db.users.count_documents({"expo_push_token": {"$ne": None}}),
+        db.users.aggregate([{"$group": {"_id": "$country_code", "count": {"$sum": 1}}}]).to_list(100),
+        db.users.find(
+            {}, {"_id": 0, "full_name": 1, "email": 1, "last_login_at": 1, "created_at": 1}
+        ).sort("last_login_at", -1).limit(50).to_list(50),
+        db.reminders.count_documents({}),
+        db.reminders.count_documents({"status": {"$in": ["pending", "active"]}}),
+        db.reminders.count_documents({"status": "completed"}),
+        db.reminder_logs.count_documents({}),
+    )
+
+    distribution = [{"region": d["_id"] or "Unknown", "count": d["count"]} for d in distribution_docs]
     for u in recent_users:
         if "last_login_at" not in u:
             u["last_login_at"] = u.get("created_at")
-            
-    total_reminders = await db.reminders.count_documents({})
-    active_reminders = await db.reminders.count_documents({"status": {"$in": ["pending", "active"]}})
-    completed_reminders = await db.reminders.count_documents({"status": "completed"})
-    total_triggers = await db.reminder_logs.count_documents({})
 
     return {
         "users": {

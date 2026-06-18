@@ -15,6 +15,20 @@ export async function clearToken() {
   await AsyncStorage.removeItem(TOKEN_KEY);
 }
 
+const REQUEST_TIMEOUT_MS = 15000;
+const NETWORK_ERROR_MSG = "Couldn't reach the server. Please check your connection and try again.";
+
+// fetch with an abort-based timeout so a stalled request fails fast instead of hanging.
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function apiFetch<T = any>(
   path: string,
   opts: RequestInit & { auth?: boolean } = {}
@@ -28,7 +42,22 @@ export async function apiFetch<T = any>(
     const token = await getToken();
     if (token) finalHeaders.Authorization = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_BASE}${path}`, { ...rest, headers: finalHeaders });
+  const url = `${API_BASE}${path}`;
+  const init: RequestInit = { ...rest, headers: finalHeaders };
+  // Only auto-retry idempotent reads — retrying POST/PUT/DELETE could double-submit.
+  const canRetry = (rest.method || "GET").toUpperCase() === "GET";
+
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, init);
+  } catch {
+    if (!canRetry) throw new Error(NETWORK_ERROR_MSG);
+    try {
+      res = await fetchWithTimeout(url, init);
+    } catch {
+      throw new Error(NETWORK_ERROR_MSG);
+    }
+  }
   const text = await res.text();
   let body: any = null;
   try {

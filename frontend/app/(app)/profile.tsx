@@ -110,23 +110,11 @@ export default function Profile() {
           <SectionTitle>Account</SectionTitle>
           <Card>
             <TouchableOpacity onPress={openEmailEdit} activeOpacity={0.7} testID="edit-email-btn">
-              <Row
-                icon="mail-outline"
-                label="Email"
-                value={user?.email_verified ? "Verified" : "Edit"}
-                valueColor={user?.email_verified ? colors.success : colors.primary}
-                chevron
-              />
+              <Row icon="mail-outline" label="Email" rightIcon="create-outline" />
             </TouchableOpacity>
             <Divider />
             <TouchableOpacity onPress={openPhoneEdit} activeOpacity={0.7} testID="edit-phone-btn">
-              <Row
-                icon="call-outline"
-                label="Phone"
-                value={user?.phone_verified ? "Verified" : "Edit"}
-                valueColor={user?.phone_verified ? colors.success : colors.primary}
-                chevron
-              />
+              <Row icon="call-outline" label="Phone" rightIcon="create-outline" />
             </TouchableOpacity>
             <Divider />
             <Row icon="notifications-outline" label="Notifications" value={user?.expo_push_token ? "Enabled" : "Not set"} />
@@ -305,7 +293,7 @@ export default function Profile() {
   );
 }
 
-function Row({ icon, label, value, chevron, valueColor }: { icon: any; label: string; value?: string; chevron?: boolean; valueColor?: string }) {
+function Row({ icon, label, value, chevron, valueColor, rightIcon }: { icon: any; label: string; value?: string; chevron?: boolean; valueColor?: string; rightIcon?: any }) {
   return (
     <View style={rowStyles.row}>
       <View style={rowStyles.iconWrap}>
@@ -313,6 +301,7 @@ function Row({ icon, label, value, chevron, valueColor }: { icon: any; label: st
       </View>
       <Text style={{ flex: 1, fontSize: 15, color: colors.text, fontWeight: "600" }}>{label}</Text>
       {value ? <Text style={{ color: valueColor || colors.textMuted, fontSize: 13, fontWeight: valueColor ? "700" : "400", marginRight: chevron ? 6 : 0 }}>{value}</Text> : null}
+      {rightIcon ? <Ionicons name={rightIcon} size={18} color={colors.primary} /> : null}
       {chevron ? <Ionicons name="chevron-forward" size={18} color={colors.textMuted} /> : null}
     </View>
   );

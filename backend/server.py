@@ -106,8 +106,7 @@ class UserSignup(BaseModel):
     password: str = Field(..., min_length=6)
     full_name: str = Field(..., min_length=1)
     country_code: str = Field(default="+91")
-    phone_verify_token: str = Field(..., min_length=1)
-    email_verify_token: str = Field(..., min_length=1)
+    # Verification no longer required at signup — it happens in-app after a grace period.
 
 
 class SendCodeIn(BaseModel):
@@ -135,6 +134,26 @@ class UserOut(BaseModel):
     country_code: str
     expo_push_token: Optional[str] = None
     created_at: str
+    phone_verified: bool = True
+    email_verified: bool = True
+
+
+class VerifyPhoneIn(BaseModel):
+    phone: str = Field(..., min_length=4)  # raw national number, no country code
+    country_code: str = Field(default="+91")
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class VerifyEmailIn(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class ProfileUpdateIn(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    country_code: Optional[str] = None
+    email: Optional[EmailStr] = None
 
 
 class TokenOut(BaseModel):
@@ -763,6 +782,9 @@ def _user_to_out(u: dict) -> UserOut:
         country_code=u.get("country_code", "+91"),
         expo_push_token=u.get("expo_push_token"),
         created_at=u.get("created_at", ""),
+        # Legacy users (created under the old verify-at-signup flow) default to verified.
+        phone_verified=u.get("phone_verified", True),
+        email_verified=u.get("email_verified", True),
     )
 
 
@@ -920,33 +942,30 @@ async def send_verification_code(payload: SendCodeIn):
     return {"ok": True, "message": "Verification code sent"}
 
 
-@api.post("/auth/verify-code")
-async def verify_code(payload: VerifyCodeIn):
-    target = payload.target
-    value = payload.value.strip()
-    code = payload.code.strip()
-
-    # Find the most recent code for this target+value
+async def _check_verification_code(target: str, value: str, code: str) -> tuple[bool, str]:
+    """Validate a one-time code for target+value. Consumes it on success; throttles
+    guessing. Returns (ok, error_message)."""
     doc = await db.verification_codes.find_one(
-        {"target": target, "value": value},
-        sort=[("created_at", -1)],
+        {"target": target, "value": value}, sort=[("created_at", -1)]
     )
     if not doc:
-        return {"ok": False, "verified": False, "message": "Invalid or expired code"}
-
-    # Throttle guessing: invalidate the code after too many wrong attempts
+        return False, "Invalid or expired code"
     if doc.get("attempts", 0) >= 5:
         await db.verification_codes.delete_many({"target": target, "value": value})
-        return {"ok": False, "verified": False, "message": "Too many incorrect attempts. Request a new code."}
-
+        return False, "Too many incorrect attempts. Request a new code."
     if doc.get("code") != code:
         await db.verification_codes.update_one({"_id": doc["_id"]}, {"$inc": {"attempts": 1}})
-        return {"ok": False, "verified": False, "message": "Invalid or expired code"}
-
-    # Code matches — issue a short-lived verification token
-    token = _create_verify_token(target, value)
-    # Clean up used codes for this target+value
+        return False, "Invalid or expired code"
     await db.verification_codes.delete_many({"target": target, "value": value})
+    return True, ""
+
+
+@api.post("/auth/verify-code")
+async def verify_code(payload: VerifyCodeIn):
+    ok, msg = await _check_verification_code(payload.target, payload.value.strip(), payload.code.strip())
+    if not ok:
+        return {"ok": False, "verified": False, "message": msg}
+    token = _create_verify_token(payload.target, payload.value.strip())
     return {"ok": True, "verified": True, "token": token}
 
 
@@ -1020,16 +1039,16 @@ async def signup(payload: UserSignup):
     if not phone_raw:
         raise HTTPException(400, "Invalid phone number")
     phone_full = f"{payload.country_code}{phone_raw}"
+    phone_suffix = _phone_suffix(phone_full)
 
-    # Validate verification tokens
-    if not _decode_verify_token(payload.phone_verify_token, "phone", phone_full):
-        raise HTTPException(400, "Phone number not verified. Please verify your phone first.")
-    if not _decode_verify_token(payload.email_verify_token, "email", email):
-        raise HTTPException(400, "Email not verified. Please verify your email first.")
-
-    existing = await db.users.find_one({"email": email})
-    if existing:
-        raise HTTPException(400, "Email already registered")
+    # No verification at signup — but reject duplicates by email OR phone.
+    dup = await db.users.find_one({"$or": [{"email": email}, {"phone_suffix": phone_suffix}]})
+    if dup:
+        raise HTTPException(
+            400,
+            "An account with this email address or phone number already exists. "
+            "Please use a different email address or phone number.",
+        )
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     doc = {
@@ -1037,13 +1056,16 @@ async def signup(payload: UserSignup):
         "email": email,
         "phone": phone_raw,
         "phone_full": phone_full,
-        "phone_suffix": _phone_suffix(phone_full),
+        "phone_suffix": phone_suffix,
         "country_code": payload.country_code,
         "full_name": payload.full_name.strip(),
         "password_hash": await asyncio.to_thread(hash_password, payload.password),
         "expo_push_token": None,
         "created_at": now,
         "last_login_at": now,
+        # Verified later, in-app, after the grace period.
+        "phone_verified": False,
+        "email_verified": False,
     }
     await db.users.insert_one(doc)
     token = create_access_token(user_id)
@@ -1068,6 +1090,83 @@ async def login(payload: UserLogin):
 @api.get("/auth/me", response_model=UserOut)
 async def me(current=Depends(get_current_user)):
     return _user_to_out(current)
+
+
+@api.post("/auth/verify-phone", response_model=UserOut)
+async def verify_phone(payload: VerifyPhoneIn, current=Depends(get_current_user)):
+    """Verify (and optionally update) the signed-in user's phone via OTP."""
+    digits = re.sub(r"[^0-9]", "", payload.phone)
+    if not digits:
+        raise HTTPException(400, "Please enter a valid phone number.")
+    phone_full = f"{payload.country_code}{digits}"
+    ok, msg = await _check_verification_code("phone", phone_full, payload.code.strip())
+    if not ok:
+        raise HTTPException(400, msg)
+    suffix = _phone_suffix(phone_full)
+    other = await db.users.find_one({"phone_suffix": suffix, "id": {"$ne": current["id"]}})
+    if other:
+        raise HTTPException(400, "This phone number is already linked to another account.")
+    await db.users.update_one({"id": current["id"]}, {"$set": {
+        "phone": digits,
+        "phone_full": phone_full,
+        "phone_suffix": suffix,
+        "country_code": payload.country_code,
+        "phone_verified": True,
+    }})
+    u = await db.users.find_one({"id": current["id"]}, {"_id": 0})
+    return _user_to_out(u)
+
+
+@api.post("/auth/verify-email", response_model=UserOut)
+async def verify_email(payload: VerifyEmailIn, current=Depends(get_current_user)):
+    """Verify (and optionally update) the signed-in user's email via OTP."""
+    email = payload.email.lower().strip()
+    ok, msg = await _check_verification_code("email", email, payload.code.strip())
+    if not ok:
+        raise HTTPException(400, msg)
+    other = await db.users.find_one({"email": email, "id": {"$ne": current["id"]}})
+    if other:
+        raise HTTPException(400, "This email is already linked to another account.")
+    await db.users.update_one({"id": current["id"]}, {"$set": {"email": email, "email_verified": True}})
+    u = await db.users.find_one({"id": current["id"]}, {"_id": 0})
+    return _user_to_out(u)
+
+
+@api.patch("/auth/profile", response_model=UserOut)
+async def update_profile(payload: ProfileUpdateIn, current=Depends(get_current_user)):
+    """Direct profile edits. A phone/email that is already verified can't be changed
+    here — it must go through OTP (verify-phone / verify-email)."""
+    updates: dict = {}
+    if payload.full_name is not None and payload.full_name.strip():
+        updates["full_name"] = payload.full_name.strip()
+
+    if payload.phone is not None:
+        if current.get("phone_verified", True):
+            raise HTTPException(400, "Please verify the new phone number to change it.")
+        digits = re.sub(r"[^0-9]", "", payload.phone)
+        if len(digits) < 6:
+            raise HTTPException(400, "Please enter a valid phone number.")
+        cc = payload.country_code or current.get("country_code", "+91")
+        phone_full = f"{cc}{digits}"
+        suffix = _phone_suffix(phone_full)
+        other = await db.users.find_one({"phone_suffix": suffix, "id": {"$ne": current["id"]}})
+        if other:
+            raise HTTPException(400, "This phone number is already linked to another account.")
+        updates.update({"phone": digits, "phone_full": phone_full, "phone_suffix": suffix, "country_code": cc})
+
+    if payload.email is not None:
+        if current.get("email_verified", True):
+            raise HTTPException(400, "Please verify the new email to change it.")
+        email = payload.email.lower().strip()
+        other = await db.users.find_one({"email": email, "id": {"$ne": current["id"]}})
+        if other:
+            raise HTTPException(400, "This email is already linked to another account.")
+        updates["email"] = email
+
+    if updates:
+        await db.users.update_one({"id": current["id"]}, {"$set": updates})
+    u = await db.users.find_one({"id": current["id"]}, {"_id": 0})
+    return _user_to_out(u)
 
 
 @api.post("/auth/push-token")

@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../../src/theme";
 import { getSafeBottom } from "../../src/safeBottom";
+import { VerificationGate } from "../../src/VerificationGate";
 
 export default function AppLayout() {
   const insets = useSafeAreaInsets();
@@ -12,6 +13,7 @@ export default function AppLayout() {
   const tabBarHeight = 60 + bottomPad;
 
   return (
+    <>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -56,5 +58,7 @@ export default function AppLayout() {
         }}
       />
     </Tabs>
+    <VerificationGate />
+    </>
   );
 }

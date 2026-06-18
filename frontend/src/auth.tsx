@@ -10,6 +10,8 @@ export type User = {
   country_code: string;
   expo_push_token?: string | null;
   created_at: string;
+  phone_verified: boolean;
+  email_verified: boolean;
 };
 
 type Ctx = {
@@ -21,8 +23,6 @@ type Ctx = {
     password: string;
     full_name: string;
     country_code: string;
-    phone_verify_token: string;
-    email_verify_token: string;
   }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -75,8 +75,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password: string;
     full_name: string;
     country_code: string;
-    phone_verify_token: string;
-    email_verify_token: string;
   }) => {
     const res = await apiFetch<{ access_token: string; user: User }>("/auth/signup", {
       method: "POST",

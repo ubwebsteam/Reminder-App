@@ -20,6 +20,16 @@ export const isValidPhoneNumber = (num: string) => {
   return d.length >= 7 && d.length <= 15;
 };
 
+/** Max digits allowed for the local number, given a country code (India = exactly 10). */
+export const maxDigitsForCountry = (cc: string) => (cc === "+91" ? 10 : 15);
+
+/** Country-aware validation: India must be exactly 10 digits; others 7–15. */
+export const isValidPhoneForCountry = (cc: string, num: string) => {
+  const d = phoneDigits(num);
+  if (cc === "+91") return d.length === 10;
+  return d.length >= 7 && d.length <= 15;
+};
+
 /**
  * Split a stored phone like "+919876543210" into { cc, number }.
  * Matches the longest known dial code; otherwise treats it all as the number.

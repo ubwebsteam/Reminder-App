@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Linking, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,12 +9,67 @@ import { useAuth } from "../../src/auth";
 import { apiFetch } from "../../src/api";
 import { Button, Card, SectionTitle } from "../../src/ui";
 import { colors, radius, spacing } from "../../src/theme";
+import { VerifyModal, CountryCodeDropdown } from "../../src/VerificationGate";
+import { phoneDigits, isValidPhoneForCountry, maxDigitsForCountry } from "../../src/countries";
+import { isValidEmail } from "../../src/utils";
 
 export default function Profile() {
-  const { user, logout } = useAuth();
+  const { user, logout, refresh } = useAuth();
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
+
+  // Verified fields require OTP to change; unverified fields edit directly.
+  const [verifyMode, setVerifyMode] = useState<"phone" | "email" | null>(null);
+  const [editMode, setEditMode] = useState<"phone" | "email" | null>(null);
+  const [editPhone, setEditPhone] = useState("");
+  const [editCc, setEditCc] = useState("+91");
+  const [editEmail, setEditEmail] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const openPhoneEdit = () => {
+    if (!user) return;
+    if (user.phone_verified) {
+      setVerifyMode("phone");
+    } else {
+      setEditCc(user.country_code || "+91");
+      setEditPhone(phoneDigits(user.phone || ""));
+      setEditMode("phone");
+    }
+  };
+
+  const openEmailEdit = () => {
+    if (!user) return;
+    if (user.email_verified) {
+      setVerifyMode("email");
+    } else {
+      setEditEmail(user.email || "");
+      setEditMode("email");
+    }
+  };
+
+  const saveDirectEdit = async () => {
+    if (editMode === "phone" && !isValidPhoneForCountry(editCc, editPhone)) {
+      return Alert.alert("Invalid phone", editCc === "+91" ? "Indian phone numbers must be exactly 10 digits." : "Please enter a valid phone number.");
+    }
+    if (editMode === "email" && !isValidEmail(editEmail)) {
+      return Alert.alert("Invalid email", "Please enter a valid email address.");
+    }
+    setSavingEdit(true);
+    try {
+      const body =
+        editMode === "phone"
+          ? { phone: phoneDigits(editPhone), country_code: editCc }
+          : { email: editEmail.trim().toLowerCase() };
+      await apiFetch("/auth/profile", { method: "PATCH", body: JSON.stringify(body) });
+      await refresh();
+      setEditMode(null);
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Couldn't save. Please try again.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const requestReset = async () => {
     if (!user?.email) {
@@ -54,6 +109,26 @@ export default function Profile() {
         <View style={{ marginTop: spacing.lg }}>
           <SectionTitle>Account</SectionTitle>
           <Card>
+            <TouchableOpacity onPress={openEmailEdit} activeOpacity={0.7} testID="edit-email-btn">
+              <Row
+                icon="mail-outline"
+                label="Email"
+                value={user?.email_verified ? "Verified" : "Edit"}
+                valueColor={user?.email_verified ? colors.success : colors.primary}
+                chevron
+              />
+            </TouchableOpacity>
+            <Divider />
+            <TouchableOpacity onPress={openPhoneEdit} activeOpacity={0.7} testID="edit-phone-btn">
+              <Row
+                icon="call-outline"
+                label="Phone"
+                value={user?.phone_verified ? "Verified" : "Edit"}
+                valueColor={user?.phone_verified ? colors.success : colors.primary}
+                chevron
+              />
+            </TouchableOpacity>
+            <Divider />
             <Row icon="notifications-outline" label="Notifications" value={user?.expo_push_token ? "Enabled" : "Not set"} />
             <Divider />
             <Row icon="shield-checkmark-outline" label="Security" value="Password protected" />
@@ -172,18 +247,72 @@ export default function Profile() {
 
         <Text style={styles.footer}>Rymind · v{Application.nativeApplicationVersion || Constants.expoConfig?.version || ""}</Text>
       </ScrollView>
+
+      {/* Verified field change → OTP required */}
+      {verifyMode && (
+        <VerifyModal
+          key={verifyMode}
+          visible
+          mode={verifyMode}
+          dismissible
+          initialPhone={user?.phone}
+          initialCc={user?.country_code}
+          initialEmail={user?.email}
+          onClose={() => setVerifyMode(null)}
+          onVerified={async () => { await refresh(); setVerifyMode(null); }}
+        />
+      )}
+
+      {/* Unverified field → direct edit, no OTP */}
+      <Modal transparent visible={!!editMode} animationType="fade" onRequestClose={() => setEditMode(null)}>
+        <View style={styles.editOverlay}>
+          <View style={styles.editCard}>
+            <Text style={styles.editTitle}>{editMode === "phone" ? "Edit phone number" : "Edit email"}</Text>
+            {editMode === "phone" ? (
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <CountryCodeDropdown value={editCc} onChange={setEditCc} />
+                <TextInput
+                  style={styles.editInput}
+                  placeholder={editCc === "+91" ? "10-digit number" : "Phone number"}
+                  placeholderTextColor={colors.placeholder}
+                  keyboardType="phone-pad"
+                  value={editPhone}
+                  onChangeText={(t) => setEditPhone(phoneDigits(t))}
+                  maxLength={maxDigitsForCountry(editCc)}
+                  testID="profile-edit-phone"
+                />
+              </View>
+            ) : (
+              <TextInput
+                style={styles.editInput}
+                placeholder="you@example.com"
+                placeholderTextColor={colors.placeholder}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                value={editEmail}
+                onChangeText={setEditEmail}
+                testID="profile-edit-email"
+              />
+            )}
+            <Button label="Save" onPress={saveDirectEdit} loading={savingEdit} style={{ marginTop: spacing.lg }} testID="profile-edit-save" />
+            <TouchableOpacity onPress={() => setEditMode(null)} style={{ alignItems: "center", marginTop: 12 }}>
+              <Text style={{ color: colors.textMuted }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-function Row({ icon, label, value, chevron }: { icon: any; label: string; value?: string; chevron?: boolean }) {
+function Row({ icon, label, value, chevron, valueColor }: { icon: any; label: string; value?: string; chevron?: boolean; valueColor?: string }) {
   return (
     <View style={rowStyles.row}>
       <View style={rowStyles.iconWrap}>
         <Ionicons name={icon} size={18} color={colors.primary} />
       </View>
       <Text style={{ flex: 1, fontSize: 15, color: colors.text, fontWeight: "600" }}>{label}</Text>
-      {value ? <Text style={{ color: colors.textMuted, fontSize: 13, marginRight: chevron ? 6 : 0 }}>{value}</Text> : null}
+      {value ? <Text style={{ color: valueColor || colors.textMuted, fontSize: 13, fontWeight: valueColor ? "700" : "400", marginRight: chevron ? 6 : 0 }}>{value}</Text> : null}
       {chevron ? <Ionicons name="chevron-forward" size={18} color={colors.textMuted} /> : null}
     </View>
   );
@@ -201,6 +330,13 @@ const rowStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  editOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: spacing.lg },
+  editCard: { backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.lg, width: "100%", maxWidth: 420, alignSelf: "center" },
+  editTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
+  editInput: {
+    flex: 1, height: 52, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    paddingHorizontal: 16, backgroundColor: colors.surface, fontSize: 16, color: colors.text,
+  },
   title: { fontSize: 28, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   avatar: {
     width: 72, height: 72, borderRadius: 36, backgroundColor: colors.primary,

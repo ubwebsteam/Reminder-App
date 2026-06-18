@@ -1053,8 +1053,10 @@ async def signup(payload: UserSignup):
 @api.post("/auth/login", response_model=TokenOut)
 async def login(payload: UserLogin):
     u = await db.users.find_one({"email": payload.email.lower().strip()})
-    if not u or not await asyncio.to_thread(verify_password, payload.password, u["password_hash"]):
-        raise HTTPException(401, "Invalid email or password")
+    if not u:
+        raise HTTPException(404, "No account found with this email. Please create an account to continue.")
+    if not await asyncio.to_thread(verify_password, payload.password, u["password_hash"]):
+        raise HTTPException(401, "Incorrect password. Please try again.")
     
     now = datetime.now(timezone.utc).isoformat()
     await db.users.update_one({"id": u["id"]}, {"$set": {"last_login_at": now}})
@@ -1696,7 +1698,7 @@ async def get_admin_analytics():
         db.users.count_documents({"expo_push_token": {"$ne": None}}),
         db.users.aggregate([{"$group": {"_id": "$country_code", "count": {"$sum": 1}}}]).to_list(100),
         db.users.find(
-            {}, {"_id": 0, "full_name": 1, "email": 1, "last_login_at": 1, "created_at": 1}
+            {}, {"_id": 0, "full_name": 1, "email": 1, "phone_full": 1, "country_code": 1, "last_login_at": 1, "created_at": 1}
         ).sort("last_login_at", -1).limit(50).to_list(50),
         db.reminders.count_documents({}),
         db.reminders.count_documents({"status": {"$in": ["pending", "active"]}}),

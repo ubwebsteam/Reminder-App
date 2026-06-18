@@ -66,26 +66,28 @@ export async function apiFetch<T = any>(
     body = text;
   }
   if (!res.ok) {
-    let msg = `Request failed (${res.status})`;
+    // 5xx — never surface server/stack details to the user
+    if (res.status >= 500) {
+      throw new Error("Something went wrong on our end. Please try again in a moment.");
+    }
+    // 422 — input validation; the client validates first and shows specifics,
+    // so this is just a friendly fallback rather than raw Pydantic field errors
+    if (res.status === 422) {
+      throw new Error("Please check the information you entered and try again.");
+    }
+    // Other 4xx — the backend's detail messages here are written to be user-facing
+    let msg = "";
     if (body) {
       const detail = body.detail;
       if (typeof detail === "string") {
         msg = detail;
       } else if (Array.isArray(detail) && detail.length > 0) {
-        // FastAPI / Pydantic validation errors — extract human-readable messages
-        msg = detail
-          .map((e: any) => {
-            const field = Array.isArray(e.loc)
-              ? e.loc.filter((l: any) => l !== "body").join(" → ")
-              : "";
-            const m = e.msg || "Invalid value";
-            return field ? `${field}: ${m}` : m;
-          })
-          .join(". ");
-      } else if (body.message) {
-        msg = typeof body.message === "string" ? body.message : JSON.stringify(body.message);
+        msg = detail.map((e: any) => e?.msg || "Invalid value").join(". ");
+      } else if (typeof body.message === "string") {
+        msg = body.message;
       }
     }
+    if (!msg) msg = "Request couldn't be completed. Please try again.";
     throw new Error(msg);
   }
   return body as T;

@@ -1144,7 +1144,7 @@ async def create_reminder(payload: ReminderCreate, current=Depends(get_current_u
     try:
         _parse_iso(payload.scheduled_at)
     except Exception:
-        raise HTTPException(400, "Invalid scheduled_at ISO datetime")
+        raise HTTPException(400, "Please pick a valid date and time.")
     rid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     doc = {

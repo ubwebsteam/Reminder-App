@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Linking, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Application from "expo-application";
 import Constants from "expo-constants";
@@ -26,6 +26,10 @@ export default function Profile() {
   const [editCc, setEditCc] = useState("+91");
   const [editEmail, setEditEmail] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Keep the profile fresh on focus — the push token is saved after login, so a
+  // cached user can otherwise show "Not set" even when notifications are enabled.
+  useFocusEffect(useCallback(() => { refresh(); }, []));
 
   const openPhoneEdit = () => {
     if (!user) return;
@@ -260,7 +264,7 @@ export default function Profile() {
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <CountryCodeDropdown value={editCc} onChange={setEditCc} />
                 <TextInput
-                  style={styles.editInput}
+                  style={[styles.editInput, { flex: 1 }]}
                   placeholder={editCc === "+91" ? "10-digit number" : "Phone number"}
                   placeholderTextColor={colors.placeholder}
                   keyboardType="phone-pad"
@@ -323,7 +327,7 @@ const styles = StyleSheet.create({
   editCard: { backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.lg, width: "100%", maxWidth: 420, alignSelf: "center" },
   editTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
   editInput: {
-    flex: 1, height: 52, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    height: 52, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
     paddingHorizontal: 16, backgroundColor: colors.surface, fontSize: 16, color: colors.text,
   },
   title: { fontSize: 28, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },

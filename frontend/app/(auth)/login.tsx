@@ -8,12 +8,15 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Button, Input } from "../../src/ui";
 import { colors, spacing } from "../../src/theme";
 import { useAuth } from "../../src/auth";
+import { apiFetch } from "../../src/api";
+import { isValidEmail } from "../../src/utils";
 
 export default function Login() {
   const router = useRouter();
@@ -21,7 +24,29 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [err, setErr] = useState("");
+
+  const onForgot = async () => {
+    if (!isValidEmail(email)) {
+      setErr("Enter your email above, then tap Forgot password.");
+      return;
+    }
+    setErr("");
+    setResetting(true);
+    try {
+      await apiFetch("/auth/reset-password-request", {
+        method: "POST",
+        auth: false,
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+      Alert.alert("Check your email", "If that email is registered, we've sent a password reset link.");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Couldn't send reset link. Please try again.");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const onSubmit = async () => {
     if (!email || !password) {
@@ -68,6 +93,9 @@ export default function Login() {
               onChangeText={setPassword}
               testID="login-password"
             />
+            <TouchableOpacity onPress={onForgot} disabled={resetting} style={styles.forgotWrap} testID="forgot-password">
+              <Text style={styles.forgot}>{resetting ? "Sending…" : "Forgot password?"}</Text>
+            </TouchableOpacity>
             {err ? <Text style={styles.err}>{err}</Text> : null}
             <Button label="Sign in" onPress={onSubmit} loading={loading} testID="login-submit" />
           </View>
@@ -102,4 +130,6 @@ const styles = StyleSheet.create({
   sub: { color: colors.textMuted, marginTop: 6, fontSize: 15 },
   err: { color: colors.danger, marginBottom: 8, fontSize: 13 },
   link: { color: colors.textMuted, fontSize: 14 },
+  forgotWrap: { alignSelf: "flex-end", marginTop: -2, marginBottom: spacing.md },
+  forgot: { color: colors.primary, fontWeight: "600", fontSize: 13 },
 });

@@ -184,7 +184,7 @@ class ReminderCreate(BaseModel):
     timezone: str = "UTC"
     channels: List[Channel]
     repeat_count: int = Field(default=1, ge=-1, le=9999)
-    repeat_interval_hours: float = Field(default=24, ge=0.0167, le=43800)  # 1 minute .. 5 years
+    repeat_interval_hours: float = Field(default=24, ge=0.016, le=43800)  # 1 minute (1/60h ≈ 0.0167) .. 5 years
     lead_minutes: int = Field(default=0, ge=0)  # reminder N minutes before
     target: ReminderTarget
     contact_id: Optional[str] = None
@@ -196,7 +196,7 @@ class ReminderUpdate(BaseModel):
     scheduled_at: Optional[str] = None
     channels: Optional[List[Channel]] = None
     repeat_count: Optional[int] = Field(default=None, ge=-1, le=9999)
-    repeat_interval_hours: Optional[float] = Field(default=None, ge=0.0167, le=43800)
+    repeat_interval_hours: Optional[float] = Field(default=None, ge=0.016, le=43800)
     lead_minutes: Optional[int] = Field(default=None, ge=0)
 
 

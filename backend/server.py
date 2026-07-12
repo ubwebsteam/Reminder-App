@@ -25,7 +25,7 @@ import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -1880,6 +1880,50 @@ async def get_admin_user_activity():
         out["user_email"] = u.get("email", "")
         items.append(out)
     return {"reminders": items, "total": len(items)}
+
+
+@api.get("/admin/marketing-emails")
+async def get_marketing_emails(
+    format: str = "json",
+    x_admin_key: Optional[str] = Header(None),
+):
+    """Export every user who opted in to marketing emails (marketing_consent == True).
+
+    Unlike the other /admin endpoints this returns raw PII (email addresses), so it is
+    gated behind the ADMIN_KEY secret: send it as the `X-Admin-Key` request header
+    (or an `?key=` won't work — header only). Set ADMIN_KEY in the backend env.
+    Pass ?format=csv to download a CSV suitable for import into an email tool.
+    """
+    admin_key = os.environ.get("ADMIN_KEY")
+    if not admin_key:
+        raise HTTPException(503, "ADMIN_KEY is not configured on the server.")
+    if x_admin_key != admin_key:
+        raise HTTPException(403, "Forbidden")
+
+    docs = await db.users.find(
+        {"marketing_consent": True},
+        {"_id": 0, "email": 1, "full_name": 1, "country_code": 1, "marketing_consent_at": 1, "created_at": 1},
+    ).sort("created_at", -1).to_list(100000)
+
+    if format.lower() == "csv":
+        def esc(v: object) -> str:
+            s = "" if v is None else str(v)
+            if any(c in s for c in [',', '"', '\n', '\r']):
+                s = '"' + s.replace('"', '""') + '"'
+            return s
+
+        lines = ["email,full_name,country_code,opted_in_at,created_at"]
+        for d in docs:
+            lines.append(",".join(esc(d.get(k)) for k in
+                                  ("email", "full_name", "country_code", "marketing_consent_at", "created_at")))
+        csv_body = "\r\n".join(lines) + "\r\n"
+        return Response(
+            content=csv_body,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=marketing-emails.csv"},
+        )
+
+    return {"total": len(docs), "users": docs}
 
 
 app.include_router(api)

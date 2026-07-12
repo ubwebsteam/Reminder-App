@@ -106,6 +106,8 @@ class UserSignup(BaseModel):
     password: str = Field(..., min_length=6)
     full_name: str = Field(..., min_length=1)
     country_code: str = Field(default="+91")
+    # Optional opt-in for marketing / promotional emails (sent via external tools).
+    marketing_consent: bool = Field(default=False)
     # Verification no longer required at signup — it happens in-app after a grace period.
 
 
@@ -136,6 +138,11 @@ class UserOut(BaseModel):
     created_at: str
     phone_verified: bool = True
     email_verified: bool = True
+    marketing_consent: bool = False
+
+
+class MarketingUnsubscribeIn(BaseModel):
+    email: EmailStr
 
 
 class VerifyPhoneIn(BaseModel):
@@ -785,6 +792,7 @@ def _user_to_out(u: dict) -> UserOut:
         # Legacy users (created under the old verify-at-signup flow) default to verified.
         phone_verified=u.get("phone_verified", True),
         email_verified=u.get("email_verified", True),
+        marketing_consent=u.get("marketing_consent", False),
     )
 
 
@@ -1066,10 +1074,37 @@ async def signup(payload: UserSignup):
         # Verified later, in-app, after the grace period.
         "phone_verified": False,
         "email_verified": False,
+        # Opt-in for marketing emails; managed via /marketing/unsubscribe.
+        "marketing_consent": bool(payload.marketing_consent),
+        "marketing_consent_at": now if payload.marketing_consent else None,
+        "marketing_unsubscribed_at": None,
     }
     await db.users.insert_one(doc)
     token = create_access_token(user_id)
     return TokenOut(access_token=token, user=_user_to_out(doc))
+
+
+@api.post("/marketing/unsubscribe")
+async def marketing_unsubscribe(payload: MarketingUnsubscribeIn):
+    """Opt an email out of marketing communications.
+
+    Called by the web unsubscribe pages (both the one-click link from an email,
+    /unsubscribe?email=…, and the manual "enter your email" form at /unsubscribe).
+    No auth: the email address is the identifier. Always responds success so the
+    endpoint can't be used to enumerate which emails have accounts. Only flips a
+    marketing flag — no destructive effect — so a plain email key is acceptable.
+    """
+    email = payload.email.lower().strip()
+    now = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"email": email},
+        {"$set": {"marketing_consent": False, "marketing_unsubscribed_at": now}},
+    )
+    return {
+        "success": True,
+        "email": email,
+        "message": "You have been unsubscribed from marketing emails.",
+    }
 
 
 @api.post("/auth/login", response_model=TokenOut)

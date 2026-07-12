@@ -12,6 +12,7 @@ export type User = {
   created_at: string;
   phone_verified: boolean;
   email_verified: boolean;
+  marketing_consent?: boolean;
 };
 
 type Ctx = {
@@ -23,6 +24,7 @@ type Ctx = {
     password: string;
     full_name: string;
     country_code: string;
+    marketing_consent: boolean;
   }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -75,6 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password: string;
     full_name: string;
     country_code: string;
+    marketing_consent: boolean;
   }) => {
     const res = await apiFetch<{ access_token: string; user: User }>("/auth/signup", {
       method: "POST",

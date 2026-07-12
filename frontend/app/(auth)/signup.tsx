@@ -28,6 +28,7 @@ export default function Signup() {
   const [cc, setCc] = useState("+91");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
@@ -48,6 +49,7 @@ export default function Signup() {
         password,
         full_name: name.trim(),
         country_code: cc,
+        marketing_consent: marketingConsent,
       });
       router.replace("/(app)/dashboard");
     } catch (e: any) {
@@ -122,6 +124,21 @@ export default function Signup() {
               onChangeText={setPassword}
               testID="signup-password"
             />
+
+            <TouchableOpacity
+              style={styles.consentRow}
+              activeOpacity={0.7}
+              onPress={() => setMarketingConsent((v) => !v)}
+              testID="signup-marketing-consent"
+            >
+              <View style={[styles.checkbox, marketingConsent && styles.checkboxChecked]}>
+                {marketingConsent ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
+              </View>
+              <Text style={styles.consentText}>
+                I'd like to receive marketing communications, promotional emails, product updates, and
+                other informational emails. <Text style={styles.consentOptional}>(Optional)</Text>
+              </Text>
+            </TouchableOpacity>
 
             {err ? <Text style={styles.err}>{err}</Text> : null}
             <Button label="Create account" onPress={onSubmit} loading={loading} testID="signup-submit" />
@@ -200,4 +217,25 @@ const styles = StyleSheet.create({
   },
   legalText: { color: colors.textMuted, fontSize: 12, textAlign: "center", marginTop: 14, lineHeight: 18 },
   legalLink: { color: colors.primary, fontWeight: "600", textDecorationLine: "underline" },
+  consentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
+  consentText: { flex: 1, color: colors.textMuted, fontSize: 12.5, lineHeight: 18 },
+  consentOptional: { color: colors.textMuted, fontStyle: "italic" },
 });
